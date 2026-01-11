@@ -84,6 +84,7 @@ readonly TARGET_FILES=(
     "tailscale_setup.desktop"
     "tailscale_uninstall.desktop"
     "volume_slider.desktop"
+    "update_dusky.desktop"
     "warp.desktop"
     "waybar_config_switcher.desktop"
     "wayclick.desktop"
