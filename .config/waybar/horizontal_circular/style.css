@@ -87,7 +87,7 @@ tooltip label {
 }
 
 #workspaces button:hover {
-    background-color: @primary_container;
+    background-color: @tertiary;
     color: @on_primary_container;
     border-radius: 16px;
     
