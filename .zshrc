@@ -187,6 +187,7 @@ else
     alias la='ls -A'
 fi
 
+alias diff='delta --side-by-side'
 alias grep='grep --color=auto'
 alias egrep='egrep --color=auto'
 alias fgrep='fgrep --color=auto'
