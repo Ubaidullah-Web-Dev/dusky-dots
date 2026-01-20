@@ -37,7 +37,8 @@ PENDING_CONTENT="" # Stores stashed edits during conflict resolution
 # ==============================================================================
 
 cleanup() {
-    [[ -n "${TEMP_FILE:-}" && -f "$TEMP_FILE" ]] && rm -f -- "$TEMP_FILE"
+    # Added '|| true' to prevent exit code 1 when TEMP_FILE is already gone/empty
+    [[ -n "${TEMP_FILE:-}" && -f "$TEMP_FILE" ]] && rm -f -- "$TEMP_FILE" || true
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -126,7 +127,7 @@ main() {
     while true; do
         clear
         printf '%s┌──────────────────────────────────────────────┐%s\n' "$BLUE" "$RESET"
-        printf '%s│ %sEDITING KEYBIND (One-Line)%s                   │%s\n' "$BLUE" "$BOLD" "$BLUE" "$RESET"
+        printf '%s│ %sEDITING KEYBIND (One-Line)%s                   │%s\n' "$BLUE" "$RESET"
         printf '%s└──────────────────────────────────────────────┘%s\n' "$BLUE" "$RESET"
         printf ' %sOriginal:%s %s\n\n' "$YELLOW" "$RESET" "$selected_line"
         
@@ -165,7 +166,8 @@ main() {
         
         local content="${user_line#*=}"
         local -a parts
-        IFS=',' read -ra parts <<< "$content"
+        # Appended a space to content so read counts empty trailing args (e.g. 'killactive,')
+        IFS=',' read -ra parts <<< "$content "
         local part_count="${#parts[@]}"
 
         local new_mods new_key
