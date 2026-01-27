@@ -48,7 +48,6 @@ input_path  = '~/.config/matugen/templates/colors.css'
 output_path = '~/.config/matugen/generated/waybar-colors.css'
 post_hook   = '''
 ~/user_scripts/waybar/waybar_autostart.sh || true;
-notify-send -i applications-graphics-symbolic "Theme Updated"
 '''
 
 [templates.swaync]
@@ -176,5 +175,6 @@ output_path = '~/.config/matugen/generated/btop-colors.theme'
 post_hook   = '''
 mkdir -p $HOME/.config/btop/themes;
 ln -nfs $HOME/.config/matugen/generated/btop-colors.theme $HOME/.config/btop/themes/matugen.theme
+notify-send -i applications-graphics-symbolic "Theme Updated"
 '''
 
