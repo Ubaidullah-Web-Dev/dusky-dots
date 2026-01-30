@@ -47,6 +47,7 @@ log_error()   { printf '%b[ERROR]%b %s\n' "${RED}" "${RESET}" "$1" >&2; exit 1; 
 cleanup() {
     [[ -n "${TEMP_DIR:-}" && -d "${TEMP_DIR}" ]] && rm -rf "${TEMP_DIR}"
     [[ -n "${AVATAR_TEMP_FILE:-}" && -f "${AVATAR_TEMP_FILE}" ]] && rm -f "${AVATAR_TEMP_FILE}"
+    return 0
 }
 trap cleanup EXIT INT TERM
 
