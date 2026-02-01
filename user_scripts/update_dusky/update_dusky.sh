@@ -248,7 +248,7 @@ declare -ra UPDATE_SEQUENCE=(
     "U | 073_desktop_apps_username_setter.sh --quiet"
 #    "U | 074_firefox_matugen_pywalfox.sh"
 #    "U | 075_spicetify_matugen_setup.sh"
-#    "U | 076_waybar_swap_config.sh"
+    "U | 076_waybar_swap_config.sh --toggle"
 #    "U | 077_mpv_setup.sh"
 #    "U | 078_kokoro_gpu_setup.sh"
 #    "U | 079_parakeet_gpu_setup.sh"
