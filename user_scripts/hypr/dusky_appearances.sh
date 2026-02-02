@@ -134,7 +134,8 @@ register 3 "Shadow Power"       "render_power|int|shadow|1|4|1"
 register 3 "Shadow Sharp"       "sharp|bool|shadow|||"
 register 3 "Shadow Scale"       "scale|float|shadow|0.0|1.1|0.05"
 register 3 "Shadow Ignore Win"  "ignore_window|bool|shadow|||"
-register 3 "Shadow Color"       "color_toggle|action|shadow|||"
+# FIX: Use single quotes to prevent variable expansion of $primary
+register 3 "Shadow Color"       'color|cycle|shadow|rgba(1a1a1aee),$primary||'
 
 # Tab 4: Snap
 register 4 "Snap Enabled"       "enabled|bool|snap|||"
@@ -271,13 +272,8 @@ load_tab_values() {
 
     for item in "${items_ref[@]}"; do
         IFS='|' read -r key type block _ _ _ <<< "${ITEM_MAP[$item]}"
-
-        if [[ $key == "color_toggle" ]]; then
-            val=${CONFIG_CACHE["color|shadow"]:-}
-        else
-            val=${CONFIG_CACHE["$key|$block"]:-}
-        fi
-
+        # UPGRADE: Removed 'color_toggle' special check. Loading is now standard.
+        val=${CONFIG_CACHE["$key|$block"]:-}
         VALUE_CACHE["$item"]=${val:-unset}
     done
 }
@@ -315,13 +311,21 @@ modify_value() {
         bool)
             [[ $current == "true" ]] && new_val="false" || new_val="true"
             ;;
-        action)
-            if [[ $key == "color_toggle" ]]; then
-                key="color"
-                [[ $current == *'$primary'* ]] && new_val='rgba(1a1a1aee)' || new_val='$primary'
-            else
-                return 0
-            fi
+        # UPGRADE: Replaced hardcoded 'action' with data-driven 'cycle' logic
+        cycle)
+            local options_str=$min
+            IFS=',' read -r -a opts <<< "$options_str"
+            local -i idx=0 found=0 count=${#opts[@]}
+            
+            for (( i=0; i<count; i++ )); do
+                [[ "${opts[i]}" == "$current" ]] && { idx=$i; found=1; break; }
+            done
+            
+            [[ $found -eq 0 ]] && idx=0
+            (( idx += direction )) || :
+            if (( idx < 0 )); then idx=$(( count - 1 )); fi
+            if (( idx >= count )); then idx=0; fi
+            new_val=${opts[idx]}
             ;;
         *) return 0 ;;
     esac
@@ -336,11 +340,7 @@ set_absolute_value() {
 
     IFS='|' read -r key type block _ _ _ <<< "${ITEM_MAP[$label]}"
 
-    # FIX: Use 'if' to prevent crash on non-matching key
-    if [[ $key == "color_toggle" ]]; then
-        key="color"
-    fi
-
+    # UPGRADE: Removed 'color_toggle' special check.
     write_value_to_file "$key" "$new_val" "$block"
     VALUE_CACHE["$label"]=$new_val
 }
@@ -365,13 +365,13 @@ draw_ui() {
     buf+="${C_MAGENTA}┌${H_LINE}┐${C_RESET}"$'\n'
 
     # Header - Dynamic Centering (printf -v to avoid subshell)
-    local raw_title="Dusky Appearances v7.2.2"
+    local raw_title="Dusky Appearances v7.2.3"
     local -i title_len=${#raw_title}
     local -i left_pad=$(( (BOX_INNER_WIDTH - title_len) / 2 ))
     local -i right_pad=$(( BOX_INNER_WIDTH - title_len - left_pad ))
 
     printf -v pad_buf '%*s' "$left_pad" ''
-    buf+="${C_MAGENTA}│${pad_buf}${C_WHITE}Dusky Appearances ${C_CYAN}v7.2.2${C_MAGENTA}"
+    buf+="${C_MAGENTA}│${pad_buf}${C_WHITE}Dusky Appearances ${C_CYAN}v7.2.3${C_MAGENTA}"
     printf -v pad_buf '%*s' "$right_pad" ''
     buf+="${pad_buf}│${C_RESET}"$'\n'
 
@@ -425,6 +425,8 @@ draw_ui() {
             true)         display="${C_GREEN}ON${C_RESET}" ;;
             false)        display="${C_RED}OFF${C_RESET}" ;;
             unset)        display="${C_RED}unset${C_RESET}" ;;
+            # Updated display logic for consistency, though 'Dynamic' was a nice touch for action.
+            # We preserve specific display logic for variables if needed, or let them fall through.
             *'$primary'*) display="${C_MAGENTA}Dynamic${C_RESET}" ;;
             *)            display="${C_WHITE}${val}${C_RESET}" ;;
         esac
