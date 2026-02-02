@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Dusky TUI Engine - Master Template v2.3
+# Dusky TUI Engine - Master Template v2.4
 # -----------------------------------------------------------------------------
-# Target: Arch Linux / Hyprland / UWSM
+# Target: Arch Linux / Hyprland / UWSM / Wayland
 # Description: High-performance, robust TUI for config modification.
 # Features:
 #   - Secure `sed` Injection Prevention
@@ -10,7 +10,8 @@
 #   - Locale Safe (Fixes "Comma Bomb")
 #   - Terminal State Preservation (stty)
 #   - Scrollable Viewport with Indicators
-#   - Mouse Support (SGR 1006)
+#   - Mouse Support (SGR 1006) with Scroll Wheel
+#   - Page Up/Down, Home/End Navigation
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -27,7 +28,7 @@ export LC_NUMERIC=C
 
 readonly CONFIG_FILE="${HOME}/.config/hypr/change_me.conf"
 readonly APP_TITLE="Dusky Template"
-readonly APP_VERSION="v2.3"
+readonly APP_VERSION="v2.4"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=14      # Rows of items to show before scrolling
@@ -77,7 +78,8 @@ readonly MOUSE_ON=$'\033[?1000h\033[?1002h\033[?1006h'
 readonly MOUSE_OFF=$'\033[?1000l\033[?1002l\033[?1006l'
 
 # Timeout for reading escape sequences (in seconds)
-readonly -r ESC_READ_TIMEOUT=0.02
+# FIX: removed invalid -r flag from readonly
+readonly ESC_READ_TIMEOUT=0.02
 
 # --- State Management ---
 declare -i SELECTED_ROW=0
@@ -183,7 +185,9 @@ populate_config_cache() {
 
         key_name=${key_part%%|*}
         # Fallback: only set if unset (first occurrence wins)
-        [[ -z ${CONFIG_CACHE["$key_name|"]:-} ]] && CONFIG_CACHE["$key_name|"]=$value_part
+        if [[ -z ${CONFIG_CACHE["$key_name|"]:-} ]]; then
+            CONFIG_CACHE["$key_name|"]=$value_part
+        fi
     done < <(awk '
         BEGIN { depth = 0 }
         /^[[:space:]]*#/ { next }
@@ -252,10 +256,10 @@ write_value_to_file() {
                     sub(/#.*/, "", txt) # Remove comments to avoid false brace counts
 
                     # Count occurrences of { and }
-                    n_open = gsub(/{/, "&", txt);
-                    n_close = gsub(/}/, "&", txt);
+                    n_open = gsub(/{/, "&", txt)
+                    n_close = gsub(/}/, "&", txt)
                     
-                    depth += n_open - n_close;
+                    depth += n_open - n_close
                     
                     # We are in the block once we process the first line (tail guarantees this)
                     if (NR == 1) found=1
@@ -285,7 +289,9 @@ write_value_to_file() {
     fi
 
     CONFIG_CACHE["$key|$block"]=$new_val
-    [[ -z $block ]] && CONFIG_CACHE["$key|"]=$new_val
+    if [[ -z $block ]]; then
+        CONFIG_CACHE["$key|"]=$new_val
+    fi
 }
 
 load_tab_values() {
@@ -311,16 +317,20 @@ modify_value() {
 
     case $type in
         int)
-            [[ ! $current =~ ^-?[0-9]+$ ]] && current=${min:-0}
+            if [[ ! $current =~ ^-?[0-9]+$ ]]; then
+                current=${min:-0}
+            fi
             local -i int_step=${step:-1} int_val=$current
             (( int_val += direction * int_step )) || :
             
-            [[ -n $min ]] && (( int_val < min )) && int_val=$min
-            [[ -n $max ]] && (( int_val > max )) && int_val=$max
+            if [[ -n $min ]] && (( int_val < min )); then int_val=$min; fi
+            if [[ -n $max ]] && (( int_val > max )); then int_val=$max; fi
             new_val=$int_val
             ;;
         float)
-            [[ ! $current =~ ^-?[0-9]*\.?[0-9]+$ ]] && current=${min:-0.0}
+            if [[ ! $current =~ ^-?[0-9]*\.?[0-9]+$ ]]; then
+                current=${min:-0.0}
+            fi
             # Note: LC_NUMERIC=C is set globally, so awk is safe here.
             new_val=$(awk -v c="$current" -v dir="$direction" -v s="${step:-0.1}" \
                           -v mn="$min" -v mx="$max" 'BEGIN {
@@ -331,7 +341,11 @@ modify_value() {
             }')
             ;;
         bool)
-            [[ $current == "true" ]] && new_val="false" || new_val="true"
+            if [[ $current == "true" ]]; then
+                new_val="false"
+            else
+                new_val="true"
+            fi
             ;;
         cycle)
             local -a opts
@@ -341,7 +355,10 @@ modify_value() {
             (( count == 0 )) && return 0
 
             for (( i = 0; i < count; i++ )); do
-                [[ "${opts[i]}" == "$current" ]] && { idx=$i; break; }
+                if [[ "${opts[i]}" == "$current" ]]; then
+                    idx=$i
+                    break
+                fi
             done
             
             (( idx += direction )) || :
@@ -459,7 +476,7 @@ draw_ui() {
     visible_end=$(( SCROLL_OFFSET + MAX_DISPLAY_ROWS ))
     (( visible_end > count )) && visible_end=$count
 
-    # Top Scroll Indicator
+    # Top Scroll Indicator with position info
     if (( SCROLL_OFFSET > 0 )); then
         buf+="${C_GREY}    ▲ (more above)${CLR_EOL}${C_RESET}"$'\n'
     else
@@ -494,9 +511,14 @@ draw_ui() {
         buf+="${CLR_EOL}"$'\n'
     done
 
-    # Bottom Scroll Indicator
-    if (( visible_end < count )); then
-        buf+="${C_GREY}    ▼ (more below)${CLR_EOL}${C_RESET}"$'\n'
+    # Bottom Scroll Indicator with position counter
+    if (( count > MAX_DISPLAY_ROWS )); then
+        local position_info="[$(( SELECTED_ROW + 1 ))/${count}]"
+        if (( visible_end < count )); then
+            buf+="${C_GREY}    ▼ (more below) ${position_info}${CLR_EOL}${C_RESET}"$'\n'
+        else
+            buf+="${C_GREY}                   ${position_info}${CLR_EOL}${C_RESET}"$'\n'
+        fi
     else
         buf+="${CLR_EOL}"$'\n'
     fi
@@ -521,6 +543,37 @@ navigate() {
     # Wrap selection
     (( SELECTED_ROW < 0 )) && SELECTED_ROW=$(( count - 1 ))
     (( SELECTED_ROW >= count )) && SELECTED_ROW=0
+}
+
+# Page navigation (no wrap)
+navigate_page() {
+    local -i dir=$1
+    # shellcheck disable=SC2178
+    local -n items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    local -i count=${#items_ref[@]}
+
+    (( count == 0 )) && return 0
+    (( SELECTED_ROW += dir * MAX_DISPLAY_ROWS )) || :
+
+    # Clamp without wrapping
+    (( SELECTED_ROW < 0 )) && SELECTED_ROW=0
+    (( SELECTED_ROW >= count )) && SELECTED_ROW=$(( count - 1 ))
+}
+
+# Jump to first/last item
+navigate_end() {
+    local -i target=$1  # 0 = first, 1 = last
+    # shellcheck disable=SC2178
+    local -n items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    local -i count=${#items_ref[@]}
+
+    (( count == 0 )) && return 0
+
+    if (( target == 0 )); then
+        SELECTED_ROW=0
+    else
+        SELECTED_ROW=$(( count - 1 ))
+    fi
 }
 
 adjust() {
@@ -561,13 +614,23 @@ handle_mouse() {
     local type zone start end
 
     # SGR Mouse Mode (1006)
-    if [[ $input =~ ^\[\<([0-9]+);([0-9]+);([0-9]+)([Mm])$ ]]; then
+    # FIX: Properly escape '[' as \[, don't escape '<'
+    if [[ $input =~ ^\[<([0-9]+);([0-9]+);([0-9]+)([Mm])$ ]]; then
         button=${BASH_REMATCH[1]}
         x=${BASH_REMATCH[2]}
         y=${BASH_REMATCH[3]}
         type=${BASH_REMATCH[4]}
 
-        # Only handle Button Press ('M'), ignore Release ('m')
+        # Handle scroll wheel (button 64=up, 65=down) on any event
+        if (( button == 64 )); then
+            navigate -1
+            return 0
+        elif (( button == 65 )); then
+            navigate 1
+            return 0
+        fi
+
+        # Only handle Button Press ('M'), ignore Release ('m') for clicks
         [[ $type != "M" ]] && return 0
 
         # Tab bar click detection (Row 3)
@@ -604,6 +667,13 @@ handle_mouse() {
 # --- Main ---
 
 main() {
+    # 0. Bash Version Check (namerefs require 4.3+)
+    if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+        printf '%s[FATAL]%s Bash 4.3+ required (found %s)\n' \
+               "$C_RED" "$C_RESET" "$BASH_VERSION" >&2
+        exit 1
+    fi
+
     # 1. Config Validation
     if [[ ! -f $CONFIG_FILE ]]; then
         log_err "Config not found: $CONFIG_FILE"
@@ -651,11 +721,15 @@ main() {
             done
 
             case $seq in
-                '[Z')          switch_tab -1 ;; # Shift+Tab
-                '[A'|'OA')     navigate -1 ;;   # Arrow Up
-                '[B'|'OB')     navigate 1 ;;    # Arrow Down
-                '[C'|'OC')     adjust 1 ;;      # Arrow Right
-                '[D'|'OD')     adjust -1 ;;     # Arrow Left
+                '[Z')          switch_tab -1 ;;     # Shift+Tab
+                '[A'|'OA')     navigate -1 ;;       # Arrow Up
+                '[B'|'OB')     navigate 1 ;;        # Arrow Down
+                '[C'|'OC')     adjust 1 ;;          # Arrow Right
+                '[D'|'OD')     adjust -1 ;;         # Arrow Left
+                '[5~')         navigate_page -1 ;;  # Page Up
+                '[6~')         navigate_page 1 ;;   # Page Down
+                '[H'|'[1~')    navigate_end 0 ;;    # Home
+                '[F'|'[4~')    navigate_end 1 ;;    # End
                 '['*'<'*)      handle_mouse "$seq" ;;
             esac
         else
@@ -664,6 +738,8 @@ main() {
                 j|J)           navigate 1 ;;
                 l|L)           adjust 1 ;;
                 h|H)           adjust -1 ;;
+                g)             navigate_end 0 ;;    # vim: go to top
+                G)             navigate_end 1 ;;    # vim: go to bottom
                 $'\t')         switch_tab 1 ;;
                 r|R)           reset_defaults ;;
                 q|Q|$'\x03')   break ;;
