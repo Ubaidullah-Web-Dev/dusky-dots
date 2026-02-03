@@ -9,7 +9,7 @@ pages:
     items:
     - type: button
       properties:
-        title: System Updates
+        title: Dusky Update
         icon: system-software-update-symbolic
         style: suggested
       on_press:
