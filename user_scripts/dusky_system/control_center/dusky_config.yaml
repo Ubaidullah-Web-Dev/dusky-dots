@@ -455,11 +455,11 @@ pages:
       on_toggle:
         enabled:
           type: exec
-          command: $HOME/user_scripts/desktop_apps/mouse_button_reverse.sh --enable
+          command: $HOME/user_scripts/desktop_apps/mouse_button_reverse.sh --left
           terminal: false
         disabled:
           type: exec
-          command: $HOME/user_scripts/desktop_apps/mouse_button_reverse.sh --disable
+          command: $HOME/user_scripts/desktop_apps/mouse_button_reverse.sh --right
           terminal: false
 - id: display
   title: Display
@@ -475,7 +475,7 @@ pages:
       properties:
         title: Brightness Slider
         description: Adjust screen brightness
-        icon: display-brightness-symbolic
+        icon: display-brightness-high-symbolic
       on_press:
         type: exec
         command: $HOME/user_scripts/sliders/brightness_slider.sh
@@ -497,13 +497,13 @@ pages:
     items:
     - type: button
       properties:
-        title: Display Wizard (TUI)
+        title: Dusky Display (TUI)
         description: Resolution, positioning, and setup
         icon: video-display-symbolic
       on_press:
         type: exec
-        command: kitty --class monitor_tui.sh --title "Display Wizard (TUI)" --hold
-          sh -c "$HOME/user_scripts/hypr/tui_monitor.sh"
+        command: kitty --class dusky_monitor.sh --hold
+          sh -c "$HOME/user_scripts/hypr/dusky_monitor.sh"
         terminal: false
     - type: button
       properties:
@@ -594,7 +594,7 @@ pages:
       properties:
         title: Music Recognition
         description: Identify song playing now
-        icon: media-playback-start-symbolic
+        icon: media-record-symbolic
       on_press:
         type: exec
         command: $HOME/user_scripts/music/music_recognition.sh
@@ -694,13 +694,13 @@ pages:
     items:
     - type: button
       properties:
-        title: Hyprland Visuals TUI
+        title: Dusky Appearance TUI
         description: Configure borders, gaps, colors
         icon: preferences-desktop-display-symbolic
       on_press:
         type: exec
-        command: kitty --class hypr_appearance_tui.sh --title "Hyprland Visuals TUI"
-          --hold sh -c "$HOME/user_scripts/hypr/hypr_appearance_tui.sh"
+        command: kitty --class dusky_appearances.sh
+          --hold sh -c "$HOME/user_scripts/hypr/dusky_appearances.sh"
         terminal: false
     - type: button
       properties:
@@ -767,7 +767,7 @@ pages:
         icon: view-more-symbolic
       on_press:
         type: exec
-        command: kitty --class waybar_swap_config.sh --hold sh -c $HOME/user_scripts/waybar/waybar_swap_config.sh
+        command: kitty --class dusky_waybars.sh --hold sh -c $HOME/user_scripts/waybar/dusky_waybars.sh
         terminal: false
     - type: button
       properties:
@@ -776,7 +776,7 @@ pages:
         icon: preferences-system-notifications-symbolic
       on_press:
         type: exec
-        command: kitty --class swaync_side_toggle.sh --hold sh -c $HOME/user_scripts/swaync/swaync_side_toggle.sh
+        command: kitty --class dusky_swaync_side.sh --hold sh -c $HOME/user_scripts/swaync/dusky_swaync_side.sh
         terminal: false
   - type: section
     properties:
@@ -786,21 +786,21 @@ pages:
     items:
     - type: button
       properties:
-        title: Hyprlock Style
+        title: Dusky Hyprlock TUI
         description: Swap Lock Screen Layout
         icon: system-lock-screen-symbolic
       on_press:
         type: exec
-        command: kitty --class hyprlock_switcher.sh --hold sh -c $HOME/user_scripts/hyprlock/hyprlock_switcher.sh
+        command: kitty --class dusky_hyprlock_switcher.sh --hold sh -c $HOME/user_scripts/hyprlock/dusky_hyprlock_switcher.sh
         terminal: false
     - type: button
       properties:
-        title: Idle Timeout
+        title: Dusky Hypridle TUI
         description: Customize Hypridle timings (TUI)
         icon: preferences-system-time-symbolic
       on_press:
         type: exec
-        command: kitty --class timeout.sh --title "Idle Timeout" --hold sh -c "$HOME/user_scripts/hypridle/timeout.sh"
+        command: kitty --class dusky_hypridle.sh --hold sh -c "$HOME/user_scripts/hypridle/dusky_hypridle.sh"
         terminal: false
     - type: button
       properties:
@@ -828,8 +828,8 @@ pages:
         icon: system-run-symbolic
       on_press:
         type: exec
-        command: kitty --class service_toggle.sh --title "Service Manager" --hold
-          sh -c "$HOME/user_scripts/services/service_toggle.sh"
+        command: kitty --class dusky_service_toggle.sh --hold
+          sh -c "$HOME/user_scripts/services/dusky_service_toggle.sh"
         terminal: false
     - type: button
       properties:
@@ -985,13 +985,13 @@ pages:
         terminal: false
     - type: button
       properties:
-        title: Remap Keys
+        title: Dusky Keybind Manager
         description: Custom keybinding wizard (TUI)
         icon: input-keyboard-symbolic
       on_press:
         type: exec
-        command: kitty --class tui_keybinds_custom.sh --title "Remap Keys" --hold
-          sh -c "$HOME/user_scripts/hypr/tui_keybinds_custom.sh"
+        command: kitty --class dusky_keybinds.sh --hold
+          sh -c "$HOME/user_scripts/hypr/dusky_keybinds.sh"
         terminal: false
 - id: tools_and_ai
   title: Tools & AI
