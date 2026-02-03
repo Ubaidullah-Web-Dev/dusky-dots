@@ -56,12 +56,12 @@ readonly USER_SED_SAFE="${CURRENT_USER//\//\\/}"
 # ------------------------------------------------------------------------------
 readonly TARGET_FILES=(
     "asus_control.desktop"
-    "battery_notify_config.desktop"
     "btrfs_compression_stats.desktop"
     "brightness_slider.desktop"
     "cache_purge.desktop"
     "clipboard_persistance.desktop"
     "dusky_appearances.desktop"
+    "dusky_battery_notify.desktop"
     "dusky_control_center.desktop"
     "dusky_hyprlock_switcher.desktop"
     "dusky_hypridle_timeout.desktop"
