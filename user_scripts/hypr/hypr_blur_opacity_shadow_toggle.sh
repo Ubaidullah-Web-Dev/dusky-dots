@@ -34,7 +34,7 @@ die() {
     local message="$1"
     printf 'Error: %s\n' "$message" >&2
     if command -v notify-send &>/dev/null; then
-        notify-send -u critical "Hyprland Error" "$message" 2>/dev/null || true
+        notify-send "Hyprland Error" "$message" 2>/dev/null || true
     fi
     exit 1
 }
