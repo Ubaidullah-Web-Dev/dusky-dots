@@ -16,14 +16,21 @@ pages:
         type: exec
         command: kitty --class update_dusky.sh --title "System Updater" --hold sh -c "$HOME/user_scripts/update_dusky/update_dusky.sh"
         terminal: false
-    - type: button
+    - type: toggle_card
       properties:
         title: Wi-Fi
         icon: network-wireless-symbolic
-      on_press:
-        type: exec
-        command: kitty --class wifitui --title "Wi-Fi Manager" --hold sh -c "wifitui"
-        terminal: false
+        state_command: nmcli radio wifi
+        interval: 5
+      on_toggle:
+        enabled:
+          type: exec
+          command: nmcli radio wifi on && notify-send 'Wi-Fi' 'Wireless Radio Turned ON'
+          terminal: false
+        disabled:
+          type: exec
+          command: nmcli radio wifi off && notify-send 'Wi-Fi' 'Wireless Radio Turned OFF'
+          terminal: false
     - type: toggle_card
       properties:
         title: Dark Mode
