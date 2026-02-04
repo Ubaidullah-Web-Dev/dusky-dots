@@ -1017,6 +1017,111 @@ class NavigationRow(BaseActionRow):
             )
 
 
+class ExpanderRow(DynamicIconMixin, Adw.ExpanderRow):
+    """Expandable row that contains nested child rows."""
+
+    __gtype_name__ = "DuskyExpanderRow"
+
+    def __init__(
+        self,
+        properties: RowProperties,
+        items: list[object] | None = None,
+        context: RowContext | None = None,
+    ) -> None:
+        super().__init__()
+
+        self._state = WidgetState()
+        self.properties = properties
+        self.items_data: list[object] = items or []
+        self.context: RowContext = context or {}
+        self.toast_overlay: Adw.ToastOverlay | None = self.context.get("toast_overlay")
+        self.nav_view: Adw.NavigationView | None = self.context.get("nav_view")
+        self.builder_func = self.context.get("builder_func")
+
+        # Set title and subtitle
+        title = str(properties.get("title", "Expander"))
+        self.set_title(GLib.markup_escape_text(title))
+        if sub := properties.get("description", ""):
+            self.set_subtitle(GLib.markup_escape_text(str(sub)))
+
+        # Set up icon
+        icon_config = properties.get("icon", DEFAULT_ICON)
+        self.icon_widget = self._create_icon_widget(icon_config)
+        self.add_prefix(self.icon_widget)
+
+        # Build and add child rows
+        self._build_child_rows()
+
+        # Start dynamic icon updates if configured
+        if _is_dynamic_icon(icon_config) and isinstance(icon_config, dict):
+            self._start_icon_update_loop(icon_config)
+
+    def _create_icon_widget(self, icon: object) -> Gtk.Image:
+        """Create the prefix icon widget based on configuration."""
+        if isinstance(icon, dict) and icon.get("type") == "file":
+            if path := icon.get("path"):
+                p = _expand_path(str(path))
+                if p.exists():
+                    img = Gtk.Image.new_from_file(str(p))
+                    img.add_css_class("action-row-prefix-icon")
+                    return img
+
+        icon_name = _resolve_static_icon_name(icon)
+        img = Gtk.Image.new_from_icon_name(icon_name)
+        img.add_css_class("action-row-prefix-icon")
+        return img
+
+    def _build_child_rows(self) -> None:
+        """Build and add child rows from items data."""
+        for item in self.items_data:
+            if not isinstance(item, dict):
+                continue
+
+            row = self._build_single_row(item)
+            if row is not None:
+                self.add_row(row)
+
+    def _build_single_row(self, item: dict[str, object]) -> Adw.PreferencesRow | None:
+        """Build a single child row from item configuration."""
+        item_type = str(item.get("type", "")).lower()
+        props = item.get("properties", {})
+        if not isinstance(props, dict):
+            props = {}
+
+        try:
+            match item_type:
+                case "button":
+                    return ButtonRow(props, item.get("on_press"), self.context)
+                case "toggle":
+                    return ToggleRow(props, item.get("on_toggle"), self.context)
+                case "label":
+                    return LabelRow(props, item.get("value"), self.context)
+                case "slider":
+                    return SliderRow(props, item.get("on_change"), self.context)
+                case "navigation":
+                    return NavigationRow(props, item.get("layout"), self.context)
+                case "expander":
+                    return ExpanderRow(props, item.get("items"), self.context)
+                case _:
+                    log.warning(
+                        "Unknown item type '%s' in expander, skipping", item_type
+                    )
+                    return None
+        except Exception as e:
+            log.error("Failed to build child row for type '%s': %s", item_type, e)
+            return None
+
+    def do_unroot(self) -> None:
+        """GTK4 lifecycle hook: clean up when widget is removed from tree."""
+        self._perform_cleanup()
+        Adw.ExpanderRow.do_unroot(self)
+
+    def _perform_cleanup(self) -> None:
+        """Centralized cleanup for all timers and background tasks."""
+        sources = self._state.mark_destroyed_and_get_sources()
+        _batch_source_remove(*sources)
+
+
 # =============================================================================
 # GRID CARDS
 # =============================================================================

@@ -142,6 +142,7 @@ class ItemType(StrEnum):
     WARNING_BANNER = "warning_banner"
     TOGGLE_CARD = "toggle_card"
     GRID_CARD = "grid_card"
+    EXPANDER = "expander"
 
 
 class SectionType(StrEnum):
@@ -175,6 +176,7 @@ class ConfigItem(TypedDict, total=False):
     on_toggle: dict[str, Any] | None
     on_change: dict[str, Any] | None
     layout: list[Any]  # Recursive reference
+    items: list[Any]   # For expander rows
     value: dict[str, Any] | None
 
 
@@ -830,7 +832,7 @@ class DuskyControlCenter(Adw.Application):
 
                 # Exclude navigation items from search (they're structural)
                 item_type = item.get("type", "")
-                if item_type != ItemType.NAVIGATION:
+                if item_type not in (ItemType.NAVIGATION, ItemType.EXPANDER):
                     if query in title or query in desc:
                         result: ConfigItem = deepcopy(item)
                         result.setdefault("properties", {})
@@ -842,7 +844,7 @@ class DuskyControlCenter(Adw.Application):
                         )
                         yield result
 
-                # Recurse into nested layouts
+                # Recurse into nested layouts (NavigationRow)
                 if "layout" in item:
                     sub_title = str(props.get("title", "Submenu"))
                     yield from self._recursive_search(
@@ -850,6 +852,55 @@ class DuskyControlCenter(Adw.Application):
                         query,
                         f"{breadcrumb} › {sub_title}",
                     )
+
+                # Recurse into expander items
+                if "items" in item and item_type == ItemType.EXPANDER:
+                    sub_title = str(props.get("title", "Expander"))
+                    yield from self._search_expander_items(
+                        item.get("items", []),
+                        query,
+                        f"{breadcrumb} › {sub_title}",
+                    )
+
+    def _search_expander_items(
+        self,
+        items: list[ConfigItem],
+        query: str,
+        breadcrumb: str,
+    ) -> Iterator[ConfigItem]:
+        """
+        Search through expander child items recursively.
+        """
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            props = item.get("properties", {})
+            title = str(props.get("title", "")).lower()
+            desc = str(props.get("description", "")).lower()
+            item_type = item.get("type", "")
+
+            # Match against query
+            if item_type not in (ItemType.NAVIGATION, ItemType.EXPANDER):
+                if query in title or query in desc:
+                    result: ConfigItem = deepcopy(item)
+                    result.setdefault("properties", {})
+                    original_desc = props.get("description", "")
+                    result["properties"]["description"] = (
+                        f"{breadcrumb} • {original_desc}"
+                        if original_desc
+                        else breadcrumb
+                    )
+                    yield result
+
+            # Recurse into nested expanders
+            if "items" in item and item_type == ItemType.EXPANDER:
+                sub_title = str(props.get("title", "Expander"))
+                yield from self._search_expander_items(
+                    item.get("items", []),
+                    query,
+                    f"{breadcrumb} › {sub_title}",
+                )
 
     # ─────────────────────────────────────────────────────────────────────────
     # SIDEBAR
@@ -1112,6 +1163,8 @@ class DuskyControlCenter(Adw.Application):
                     return rows.SliderRow(props, item.get("on_change"), ctx)
                 case ItemType.NAVIGATION:
                     return rows.NavigationRow(props, item.get("layout"), ctx)
+                case ItemType.EXPANDER:
+                    return rows.ExpanderRow(props, item.get("items"), ctx)
                 case ItemType.WARNING_BANNER:
                     return self._build_warning_banner(props)
                 case _:
