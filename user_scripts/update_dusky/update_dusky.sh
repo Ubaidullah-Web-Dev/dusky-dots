@@ -51,6 +51,7 @@ declare -A CUSTOM_SCRIPT_PATHS=(
     ["waypaper_config_reset.sh"]="user_scripts/desktop_apps/waypaper_config_reset.sh"
     ["fix_theme_dir.sh"]="user_scripts/misc_extra/fix_theme_dir.sh"
     ["copy_service_files.sh"]="user_scripts/misc_extra/copy_service_files.sh"
+    ["update_checker.sh"]="user_scripts/update_dusky/update_checker/update_checker.sh"
 )
 
 # Centralized timestamp (Separate declaration for SC2155 compliance)
@@ -271,6 +272,7 @@ declare -ra UPDATE_SEQUENCE=(
     "U | waypaper_config_reset.sh"
     "U | fix_theme_dir.sh"
     "U | copy_service_files.sh --default"
+    "U | update_checker.sh --num"
 )
 
 # ------------------------------------------------------------------------------

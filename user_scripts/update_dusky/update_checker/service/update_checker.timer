@@ -10,7 +10,7 @@ OnBootSec=5min
 OnUnitActiveSec=20min
 
 # IMPORTANT for distributed scripts:
-# Adds a random delay of 0-5 minutes to prevent all users 
+# Adds a random delay of 0-5 minutes to prevent all users
 # from hitting GitHub at the exact same second.
 RandomizedDelaySec=300
 
