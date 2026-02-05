@@ -1,42 +1,172 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Dusky Git Checker & TUI Viewer (v4.0 - Hardened)
+# Dusky Git Checker & TUI Viewer (v5.4 - Fix Command Substitution)
 # -----------------------------------------------------------------------------
 # Target: Arch Linux / Hyprland / Bare Git Repo
-# Requires: Bash 5.0+, git
-# Optional: notify-send (for background notifications)
+# Requires: Bash 5.0+, git, coreutils (timeout)
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
-
-# Force predictable locale for numeric and sorting operations
 export LC_NUMERIC=C LC_COLLATE=C
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-declare -r  GIT_DIR="${HOME}/dusky/"
-declare -r  WORK_TREE="${HOME}"
-declare -r  STATE_FILE="${HOME}/.config/dusky/settings/dusky_update_behind_commit"
-declare -r  STATE_DIR="${STATE_FILE%/*}"
-declare -ri NOTIFY_THRESHOLD=30
-declare -ri TIMEOUT_SEC=10
+declare -r GIT_DIR="${HOME}/dusky/"
+declare -r WORK_TREE="${HOME}"
+declare -r STATE_FILE="${HOME}/.config/dusky/settings/dusky_update_behind_commit"
+declare -r STATE_DIR="${STATE_FILE%/*}"
 
-# TUI Geometry
-declare -r  APP_TITLE="Dusky Updates"
+declare -ri NOTIFY_THRESHOLD=30
+declare -ri TIMEOUT_SEC=15
+
+# TUI Settings
+declare -r APP_TITLE="Dusky Updates"
 declare -ri MAX_DISPLAY_ROWS=14
 declare -ri BOX_INNER_WIDTH=76
 declare -ri ITEM_PADDING=14
-# Header layout: border(1) + title(1) + stats(1) + border(1) + scroll-hint(1) = 5 rows
+# Row where commit list starts (1-indexed for mouse calculation)
 declare -ri ITEM_START_ROW=5
 
+# Debug mode (can be set via environment or --debug flag)
+declare -i DEBUG=${DEBUG:-0}
+
+# Refspec for bare repo fetch (ensures refs/remotes/origin/* is updated)
+declare -r FETCH_REFSPEC='+refs/heads/*:refs/remotes/origin/*'
+
+# Git Command Array
+declare -ra GIT_CMD=(/usr/bin/git --git-dir="$GIT_DIR" --work-tree="$WORK_TREE")
+
 # =============================================================================
-# GIT WRAPPER
+# UTILITIES
 # =============================================================================
 
-git_dusky() {
-    /usr/bin/git --git-dir="$GIT_DIR" --work-tree="$WORK_TREE" "$@"
+_debug() {
+    (( DEBUG )) || return 0
+    printf '[DEBUG] %s\n' "$*" >&2
+}
+
+# Pure-bash sleep alternative using read timeout
+_sleep() {
+    local -r seconds="${1:-1}"
+    read -rt "$seconds" <> <(:) 2>/dev/null || true
+}
+
+# Strip ANSI codes using Namerefs
+# Usage: _strip_ansi "input_string" output_variable_name
+_strip_ansi() {
+    local str="$1"
+    local -n _out_ref=$2
+    _out_ref=""
+    while [[ "$str" =~ ^([^$'\e']*)\e\[[0-9\;]*m(.*)$ ]]; do
+        _out_ref+="${BASH_REMATCH[1]}"
+        str="${BASH_REMATCH[2]}"
+    done
+    _out_ref+="$str"
+}
+
+# =============================================================================
+# VALIDATION
+# =============================================================================
+
+validate_environment() {
+    if (( BASH_VERSINFO[0] < 5 )); then
+        printf 'ERROR: Bash 5.0+ required (found %s)\n' "$BASH_VERSION" >&2
+        return 1
+    fi
+
+    if [[ ! -d "$GIT_DIR" ]]; then
+        printf 'ERROR: Git directory not found: %s\n' "$GIT_DIR" >&2
+        return 1
+    fi
+
+    if [[ ! -f "${GIT_DIR}/HEAD" ]]; then
+        printf 'ERROR: Not a valid git directory: %s\n' "$GIT_DIR" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# =============================================================================
+# ROBUST FETCH LOGIC
+# =============================================================================
+
+declare FETCH_INFO=""
+
+robust_fetch() {
+    FETCH_INFO=""
+
+    # FIX: Added $() wrapper to execute the command and capture output
+    local origin_url
+    if ! origin_url=$("${GIT_CMD[@]}" remote get-url origin 2>/dev/null); then
+        FETCH_INFO="No 'origin' remote configured"
+        _debug "No origin remote found"
+        return 1
+    fi
+    _debug "Origin URL: $origin_url"
+
+    # Attempt 1: Fetch via configured remote
+    _debug "Trying: git fetch origin with refspec"
+    # NOTE: timeout executes the command directly, so no $() needed here.
+    if timeout "$TIMEOUT_SEC" "${GIT_CMD[@]}" fetch --quiet origin "$FETCH_REFSPEC" 2>/dev/null; then
+        FETCH_INFO="Fetched via origin"
+        _debug "Fetch succeeded"
+        return 0
+    fi
+    _debug "Primary fetch failed, attempting HTTPS fallback"
+
+    # Attempt 2: HTTPS Fallback
+    local https_url=""
+
+    if [[ "$origin_url" =~ ^git@([^:]+):(.+)$ ]]; then
+        https_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+    elif [[ "$origin_url" =~ ^ssh://git@([^/]+)/(.+)$ ]]; then
+        https_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+    elif [[ "$origin_url" =~ ^https:// ]]; then
+        https_url="$origin_url"
+    else
+        FETCH_INFO="Cannot parse URL: ${origin_url:0:40}"
+        _debug "URL format not recognized"
+        return 1
+    fi
+
+    https_url="${https_url%.git}"
+    _debug "HTTPS URL: $https_url"
+
+    if timeout "$TIMEOUT_SEC" "${GIT_CMD[@]}" fetch --quiet "$https_url" "$FETCH_REFSPEC" 2>/dev/null; then
+        FETCH_INFO="Fetched via HTTPS fallback"
+        _debug "HTTPS fetch succeeded"
+        return 0
+    fi
+
+    FETCH_INFO="All fetch methods failed"
+    _debug "All fetch attempts exhausted"
+    return 1
+}
+
+# =============================================================================
+# UPSTREAM DETECTION
+# =============================================================================
+
+get_upstream_ref() {
+    # FIX: Added $() wrapper
+    local tracking
+    if tracking=$("${GIT_CMD[@]}" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null) && [[ -n "$tracking" ]]; then
+        printf '%s' "$tracking"
+        return 0
+    fi
+
+    local ref
+    for ref in origin/main origin/master; do
+        if "${GIT_CMD[@]}" rev-parse --verify --quiet "$ref" &>/dev/null; then
+            printf '%s' "$ref"
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 # =============================================================================
@@ -46,27 +176,78 @@ git_dusky() {
 run_background_check() {
     [[ -d "$STATE_DIR" ]] || mkdir -p "$STATE_DIR"
 
-    if ! timeout "$TIMEOUT_SEC" git_dusky fetch -q origin 2>/dev/null; then
-        [[ -f "$STATE_FILE" ]] || printf '0\n' >"$STATE_FILE"
+    if ! robust_fetch; then
+        _debug "Fetch failed, writing -1"
+        printf -- '%d\n' -1 > "$STATE_FILE"
         exit 0
     fi
 
+    local upstream
+    if ! upstream=$(get_upstream_ref); then
+        _debug "No upstream found, writing -2"
+        printf -- '%d\n' -2 > "$STATE_FILE"
+        exit 0
+    fi
+    _debug "Upstream: $upstream"
+
     local -i count=0
-    count=$(git_dusky rev-list --count HEAD..@{u} 2>/dev/null) || count=0
-    printf '%d\n' "$count" >"$STATE_FILE"
+    # FIX: Added $() wrapper
+    count=$("${GIT_CMD[@]}" rev-list --count "HEAD..${upstream}" 2>/dev/null) || count=0
+    _debug "Commits behind: $count"
+
+    printf -- '%d\n' "$count" > "$STATE_FILE"
 
     if (( count >= NOTIFY_THRESHOLD )) && command -v notify-send &>/dev/null; then
-        notify-send -u critical -t 10000 \
+        notify-send -u normal -t 5000 -i software-update-available \
             "Dusky Dotfiles" \
-            "Update Critical: Your system is ${count} commits behind."
+            "Update Available: Your system is ${count} commits behind."
     fi
+
     exit 0
 }
 
-[[ "${1:-}" == "--num" ]] && run_background_check
+# =============================================================================
+# ARGUMENT PARSING
+# =============================================================================
+
+parse_arguments() {
+    while (( $# > 0 )); do
+        case "$1" in
+            --num)
+                run_background_check
+                ;;
+            --debug)
+                DEBUG=1
+                _debug "Debug mode enabled"
+                shift
+                ;;
+            --fix-config)
+                printf 'Adding fetch refspec to git config...\n'
+                "${GIT_CMD[@]}" config remote.origin.fetch "$FETCH_REFSPEC"
+                printf 'Done. Current value:\n'
+                "${GIT_CMD[@]}" config --get remote.origin.fetch
+                exit 0
+                ;;
+            --help|-h)
+                printf 'Usage: %s [OPTIONS]\n\n' "${0##*/}"
+                printf 'Options:\n'
+                printf '  --num        Output commit count to state file (for Waybar)\n'
+                printf '  --debug      Enable debug output\n'
+                printf '  --fix-config Add fetch refspec to git config\n'
+                exit 0
+                ;;
+            *)
+                printf 'Unknown option: %s\n' "$1" >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
+parse_arguments "$@"
 
 # =============================================================================
-# ANSI SEQUENCES
+# ANSI ESCAPE CODES
 # =============================================================================
 
 declare _hbuf
@@ -74,9 +255,9 @@ printf -v _hbuf '%*s' "$BOX_INNER_WIDTH" ''
 declare -r H_LINE="${_hbuf// /─}"
 unset _hbuf
 
-declare -r C_RESET=$'\e[0m'    C_CYAN=$'\e[1;36m'   C_GREEN=$'\e[1;32m'
+declare -r C_RESET=$'\e[0m'     C_CYAN=$'\e[1;36m'    C_GREEN=$'\e[1;32m'
 declare -r C_YELLOW=$'\e[1;33m' C_MAGENTA=$'\e[1;35m' C_WHITE=$'\e[1;37m'
-declare -r C_GREY=$'\e[1;30m'   C_INVERSE=$'\e[7m'
+declare -r C_GREY=$'\e[1;30m'   C_RED=$'\e[1;31m'     C_INVERSE=$'\e[7m'
 
 declare -r CLR_EOL=$'\e[K'      CLR_EOS=$'\e[J'       CLR_SCREEN=$'\e[2J'
 declare -r CUR_HOME=$'\e[H'     CUR_HIDE=$'\e[?25l'   CUR_SHOW=$'\e[?25h'
@@ -84,17 +265,13 @@ declare -r MOUSE_ON=$'\e[?1000h\e[?1002h\e[?1006h'
 declare -r MOUSE_OFF=$'\e[?1000l\e[?1002l\e[?1006l'
 
 # =============================================================================
-# STATE
+# TUI STATE
 # =============================================================================
 
 declare -i SELECTED_ROW=0 SCROLL_OFFSET=0
 declare -i TOTAL_COMMITS=0 LOCAL_REV=0 REMOTE_REV=0
 declare -a COMMIT_HASHES=() COMMIT_MSGS=()
-declare    ORIGINAL_STTY=""
-
-# =============================================================================
-# CLEANUP
-# =============================================================================
+declare ORIGINAL_STTY="" FETCH_STATUS="OK"
 
 cleanup() {
     printf '%s%s%s\n' "$MOUSE_OFF" "$CUR_SHOW" "$C_RESET"
@@ -108,42 +285,67 @@ trap 'exit 130' INT TERM HUP
 # =============================================================================
 
 load_commits() {
-    COMMIT_HASHES=() COMMIT_MSGS=()
-    
+    COMMIT_HASHES=()
+    COMMIT_MSGS=()
+
+    local upstream
+    if ! upstream=$(get_upstream_ref); then
+        COMMIT_HASHES=("ERR")
+        COMMIT_MSGS=("No upstream branch found (try: git branch -u origin/main)")
+        TOTAL_COMMITS=1
+        FETCH_STATUS="NO_UPSTREAM"
+        LOCAL_REV=0
+        REMOTE_REV=0
+        return
+    fi
+
+    # FIX: Added $() wrappers here
+    LOCAL_REV=$("${GIT_CMD[@]}" rev-list --count HEAD 2>/dev/null) || LOCAL_REV=0
+    REMOTE_REV=$("${GIT_CMD[@]}" rev-list --count "$upstream" 2>/dev/null) || REMOTE_REV=0
+
     local -i count=0
-    count=$(git_dusky rev-list --count HEAD..@{u} 2>/dev/null) || count=0
-    LOCAL_REV=$(git_dusky rev-list --count HEAD 2>/dev/null)   || LOCAL_REV=0
-    REMOTE_REV=$(git_dusky rev-list --count @{u} 2>/dev/null)  || REMOTE_REV=0
+    count=$("${GIT_CMD[@]}" rev-list --count "HEAD..${upstream}" 2>/dev/null) || count=0
+
+    _debug "load_commits: HEAD=$LOCAL_REV, upstream=$REMOTE_REV, behind=$count"
 
     if (( count == 0 )); then
+        if [[ "$FETCH_STATUS" == "FAIL" ]]; then
+            COMMIT_HASHES=("ERR")
+            COMMIT_MSGS=("Fetch failed - cannot verify status")
+            TOTAL_COMMITS=1
+            return
+        fi
         COMMIT_HASHES=("HEAD")
         COMMIT_MSGS=("Dusky is up to date!")
         TOTAL_COMMITS=1
-        return 0
+        return
     fi
 
     local -ri max_len=$(( BOX_INNER_WIDTH - ITEM_PADDING - 6 ))
     local hash msg
 
+    # FIX: Added $() wrapper for process substitution
     while IFS='|' read -r hash msg; do
-        [[ -z $hash ]] && continue
+        [[ -z "$hash" ]] && continue
         COMMIT_HASHES+=("$hash")
-        (( ${#msg} > max_len )) && msg="${msg:0:max_len-1}…"
+        if (( ${#msg} > max_len )); then
+            msg="${msg:0:max_len-1}…"
+        fi
         COMMIT_MSGS+=("$msg")
-    done < <(git_dusky log HEAD..@{u} --pretty=format:'%h|%s' 2>/dev/null)
+    done < <("${GIT_CMD[@]}" --no-pager log "HEAD..${upstream}" --no-color --pretty=format:'%h|%s' 2>/dev/null)
 
     TOTAL_COMMITS=${#COMMIT_HASHES[@]}
 
-    # Fallback if git log failed after count succeeded
+    # Safety: if rev-list said N commits but log returned empty
     if (( TOTAL_COMMITS == 0 )); then
-        COMMIT_HASHES=("ERR")
-        COMMIT_MSGS=("Failed to retrieve commit list")
+        COMMIT_HASHES=("WARN")
+        COMMIT_MSGS=("Detected $count updates but log was empty")
         TOTAL_COMMITS=1
     fi
 }
 
 # =============================================================================
-# RENDERING
+# UI ENGINE
 # =============================================================================
 
 draw_ui() {
@@ -151,11 +353,9 @@ draw_ui() {
     local -i vlen lpad rpad vstart vend i
 
     buf+="$CUR_HOME"
-
-    # ── Header Box ──
     buf+="${C_MAGENTA}┌${H_LINE}┐${C_RESET}"$'\n'
 
-    # Title with revision info
+    # Title line
     local raw="${APP_TITLE} Local: #${LOCAL_REV} vs Remote: #${REMOTE_REV}"
     vlen=${#raw}
     lpad=$(( (BOX_INNER_WIDTH - vlen) / 2 ))
@@ -166,15 +366,33 @@ draw_ui() {
     buf+="${pad}${C_MAGENTA}│${C_RESET}"$'\n'
 
     # Status line
-    local stats="Commits Behind: ${TOTAL_COMMITS}"
-    [[ ${COMMIT_HASHES[0]} == "HEAD" ]] && stats="Status: Up to date"
-    [[ ${COMMIT_HASHES[0]} == "ERR" ]]  && stats="Status: Load error"
-    printf -v pad '%*s' "$(( BOX_INNER_WIDTH - ${#stats} - 1 ))" ''
-    buf+="${C_MAGENTA}│ ${C_GREEN}${stats}${pad}${C_MAGENTA}│${C_RESET}"$'\n'
+    local stats=""
+    case "$FETCH_STATUS" in
+        FAIL)
+            stats="${C_RED}Fetch Failed: ${FETCH_INFO:0:45}${C_RESET}"
+            ;;
+        NO_UPSTREAM)
+            stats="${C_RED}Status: No Upstream Branch${C_RESET}"
+            ;;
+        *)
+            case "${COMMIT_HASHES[0]:-}" in
+                HEAD) stats="${C_GREEN}Status: Up to date${C_RESET}" ;;
+                WARN) stats="${C_YELLOW}Status: Log Error${C_RESET}" ;;
+                ERR)  stats="${C_RED}Status: Error${C_RESET}" ;;
+                *)    stats="${C_YELLOW}Commits Behind: ${TOTAL_COMMITS}${C_RESET}" ;;
+            esac
+            ;;
+    esac
 
+    local plain_stats=""
+    _strip_ansi "$stats" plain_stats
+    local -i pad_len=$(( BOX_INNER_WIDTH - ${#plain_stats} - 1 ))
+    (( pad_len < 0 )) && pad_len=0
+    printf -v pad '%*s' "$pad_len" ''
+    buf+="${C_MAGENTA}│ ${stats}${pad}${C_MAGENTA}│${C_RESET}"$'\n'
     buf+="${C_MAGENTA}└${H_LINE}┘${C_RESET}"$'\n'
 
-    # ── Scroll bounds ──
+    # Scroll bounds
     if (( TOTAL_COMMITS > 0 )); then
         (( SELECTED_ROW < 0 )) && SELECTED_ROW=0
         (( SELECTED_ROW >= TOTAL_COMMITS )) && SELECTED_ROW=$(( TOTAL_COMMITS - 1 ))
@@ -182,21 +400,22 @@ draw_ui() {
         (( SELECTED_ROW >= SCROLL_OFFSET + MAX_DISPLAY_ROWS )) && \
             SCROLL_OFFSET=$(( SELECTED_ROW - MAX_DISPLAY_ROWS + 1 ))
     else
-        SELECTED_ROW=0 SCROLL_OFFSET=0
+        SELECTED_ROW=0
+        SCROLL_OFFSET=0
     fi
 
     vstart=$SCROLL_OFFSET
     vend=$(( SCROLL_OFFSET + MAX_DISPLAY_ROWS ))
     (( vend > TOTAL_COMMITS )) && vend=$TOTAL_COMMITS
 
-    # Scroll indicator (above)
+    # "More above" indicator
     if (( SCROLL_OFFSET > 0 )); then
         buf+="${C_GREY}    ▲ (more above)${CLR_EOL}${C_RESET}"$'\n'
     else
         buf+="${CLR_EOL}"$'\n'
     fi
 
-    # ── List items ──
+    # Commit list
     for (( i = vstart; i < vend; i++ )); do
         local h="${COMMIT_HASHES[i]}" m="${COMMIT_MSGS[i]}" ph
         printf -v ph "%-${ITEM_PADDING}s" "$h"
@@ -207,12 +426,12 @@ draw_ui() {
         fi
     done
 
-    # Blank rows to fill viewport
+    # Fill remaining rows
     for (( i = vend - vstart; i < MAX_DISPLAY_ROWS; i++ )); do
         buf+="${CLR_EOL}"$'\n'
     done
 
-    # Scroll indicator (below)
+    # "More below" indicator
     if (( TOTAL_COMMITS > MAX_DISPLAY_ROWS )); then
         local pos="[$(( SELECTED_ROW + 1 ))/${TOTAL_COMMITS}]"
         if (( vend < TOTAL_COMMITS )); then
@@ -224,10 +443,9 @@ draw_ui() {
         buf+="${CLR_EOL}"$'\n'
     fi
 
-    # Help bar
+    # Help footer
     buf+=$'\n'"${C_CYAN} [↑↓/jk] Move  [PgUp/Dn] Page  [g/G] Start/End  [q] Quit${C_RESET}"$'\n'
     buf+="${C_CYAN} Repo: ${C_WHITE}${GIT_DIR}${C_RESET}${CLR_EOL}${CLR_EOS}"
-
     printf '%s' "$buf"
 }
 
@@ -237,22 +455,20 @@ draw_ui() {
 
 nav_step() {
     local -i d=$1
-    (( TOTAL_COMMITS == 0 )) && return 0
-    # Use modulo arithmetic for infinite scrolling
+    (( TOTAL_COMMITS == 0 )) && return
     SELECTED_ROW=$(( (SELECTED_ROW + d + TOTAL_COMMITS) % TOTAL_COMMITS ))
 }
 
 nav_page() {
     local -i d=$1
-    (( TOTAL_COMMITS == 0 )) && return 0
+    (( TOTAL_COMMITS == 0 )) && return
     SELECTED_ROW=$(( SELECTED_ROW + d * MAX_DISPLAY_ROWS ))
-    # Clamp to bounds (no wrap on page jump)
     (( SELECTED_ROW < 0 )) && SELECTED_ROW=0
     (( SELECTED_ROW >= TOTAL_COMMITS )) && SELECTED_ROW=$(( TOTAL_COMMITS - 1 ))
 }
 
 nav_edge() {
-    (( TOTAL_COMMITS == 0 )) && return 0
+    (( TOTAL_COMMITS == 0 )) && return
     case $1 in
         home) SELECTED_ROW=0 ;;
         end)  SELECTED_ROW=$(( TOTAL_COMMITS - 1 )) ;;
@@ -261,25 +477,20 @@ nav_edge() {
 
 handle_mouse() {
     local seq=$1
-    # SGR mouse: [<btn;col;rowM or [<btn;col;rowm
     local re='^\[<([0-9]+);[0-9]+;([0-9]+)([Mm])$'
     [[ $seq =~ $re ]] || return 0
 
     local -i btn=${BASH_REMATCH[1]} row=${BASH_REMATCH[2]}
-    local ev=${BASH_REMATCH[3]}
+    local act=${BASH_REMATCH[3]}
 
     case $btn in
-        64) nav_step -1; return 0 ;;   # scroll up
-        65) nav_step  1; return 0 ;;   # scroll down
+        64) nav_step -1; return ;;
+        65) nav_step 1; return ;;
     esac
 
-    [[ $ev == M ]] || return 0  # ignore release
-
-    local -i list_start=$(( ITEM_START_ROW + 1 ))
-    if (( row >= list_start && row < list_start + MAX_DISPLAY_ROWS )); then
-        local -i idx=$(( row - list_start + SCROLL_OFFSET ))
-        (( idx >= 0 && idx < TOTAL_COMMITS )) && SELECTED_ROW=$idx
-    fi
+    [[ $act == M ]] || return
+    local -i idx=$(( row - ITEM_START_ROW - 1 + SCROLL_OFFSET ))
+    (( idx >= 0 && idx < TOTAL_COMMITS )) && SELECTED_ROW=$idx
 }
 
 # =============================================================================
@@ -287,22 +498,22 @@ handle_mouse() {
 # =============================================================================
 
 main() {
-    (( BASH_VERSINFO[0] >= 5 )) || {
-        printf 'Error: Bash 5.0+ required (found %s)\n' "$BASH_VERSION" >&2
-        exit 1
-    }
+    validate_environment || exit 1
 
     printf '\n%sFetching updates from origin...%s\n' "$C_CYAN" "$C_RESET"
-    printf '%s(If prompted, enter your SSH key passphrase)%s\n\n' "$C_GREY" "$C_RESET"
 
-    if ! timeout "$TIMEOUT_SEC" git_dusky fetch -q origin 2>/dev/null; then
-        printf '%s[WARNING] Fetch failed or timed out.%s\n' "$C_YELLOW" "$C_RESET"
-        sleep 2
+    if ! robust_fetch; then
+        printf '%s[WARNING] Fetch failed: %s%s\n' "$C_YELLOW" "$FETCH_INFO" "$C_RESET"
+        FETCH_STATUS="FAIL"
+        _sleep 2
+    else
+        printf '%s[OK] %s%s\n' "$C_GREEN" "$FETCH_INFO" "$C_RESET"
+        _sleep 1
     fi
 
     load_commits
 
-    ORIGINAL_STTY=$(stty -g 2>/dev/null) || ORIGINAL_STTY=""
+    ORIGINAL_STTY=$(stty -g 2>/dev/null) || true
     printf '%s%s%s%s' "$MOUSE_ON" "$CUR_HIDE" "$CLR_SCREEN" "$CUR_HOME"
 
     local key seq ch
@@ -312,29 +523,29 @@ main() {
 
         if [[ $key == $'\e' ]]; then
             seq=""
-            # Increased timeout to 0.05s to prevent split escape codes on slow terminals
-            while IFS= read -rsn1 -t 0.05 ch; do seq+="$ch"; done
-
+            while IFS= read -rsn1 -t 0.05 ch; do
+                seq+="$ch"
+            done
             case $seq in
-                ''       ) break ;;              # bare ESC = quit
-                '[A'|OA  ) nav_step -1 ;;        # Up
-                '[B'|OB  ) nav_step  1 ;;        # Down
-                '[5~'    ) nav_page -1 ;;        # PgUp
-                '[6~'    ) nav_page  1 ;;        # PgDn
-                '[H'|'[1~') nav_edge home ;;     # Home
-                '[F'|'[4~') nav_edge end ;;      # End
-                '['*'<'* ) handle_mouse "$seq" ;;
+                '')          break ;;
+                '[A'|OA)     nav_step -1 ;;
+                '[B'|OB)     nav_step 1 ;;
+                '[5~')       nav_page -1 ;;
+                '[6~')       nav_page 1 ;;
+                '[H'|'[1~')  nav_edge home ;;
+                '[F'|'[4~')  nav_edge end ;;
+                '['*'<'*)    handle_mouse "$seq" ;;
             esac
         else
             case $key in
-                k|K      ) nav_step -1 ;;
-                j|J      ) nav_step  1 ;;
-                g        ) nav_edge home ;;
-                G        ) nav_edge end ;;
+                k|K)         nav_step -1 ;;
+                j|J)         nav_step 1 ;;
+                g)           nav_edge home ;;
+                G)           nav_edge end ;;
                 q|Q|$'\x03') break ;;
             esac
         fi
     done
 }
 
-main "$@"
+main

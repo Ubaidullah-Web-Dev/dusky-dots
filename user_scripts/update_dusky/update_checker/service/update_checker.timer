@@ -1,17 +1,21 @@
 [Unit]
-Description=Timer for Dusky Update Checker (Every 2h)
+Description=Dusky Update Checker Timer (Every 20m)
 
 [Timer]
-# Wait 10 minutes after boot/login before the first check
-OnBootSec=10min
+# Wait 5 minutes after boot/login before the first check
+# (Prevents slowing down the startup process)
+OnBootSec=5min
 
-# Run 2 hours after the LAST run finished
-OnUnitActiveSec=2h
+# Run 20 minutes after the last run finished
+OnUnitActiveSec=20min
 
-# Add up to 5 minutes of random delay to prevent precise-time CPU spikes
-RandomizedDelaySec=5m
+# IMPORTANT for distributed scripts:
+# Adds a random delay of 0-5 minutes to prevent all users 
+# from hitting GitHub at the exact same second.
+RandomizedDelaySec=300
 
-# If the computer was off during a scheduled run, run immediately on boot
+# If the computer was off during the last scheduled run,
+# run immediately upon booting up.
 Persistent=true
 
 [Install]
