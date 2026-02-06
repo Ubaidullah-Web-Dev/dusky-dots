@@ -527,9 +527,21 @@ pages:
       icon: ''
       description: ''
     items:
+    - type: selection
+      properties:
+        title: Active Profile
+        description: Select performance mode
+        icon: power-profile-balanced-symbolic
+        options:
+        - Balanced
+        - Performance
+        - Power Saver
+      on_change:
+        type: exec
+        command: "mode=$(echo '{value}' | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g'); tlpctl $mode && notify-send 'Power Profile' 'Switched to {value}'"
     - type: toggle
       properties:
-        title: Power Saver
+        title: Dusky Power Saver
         icon: battery-level-80-symbolic
         description: Optimize for battery life (TUI)
         key: power_saver_state
@@ -652,6 +664,47 @@ pages:
   title: Audio
   icon: audio-volume-high-symbolic
   layout:
+  - type: grid_section
+    properties:
+      title: Quick Audio
+    items:
+    - type: toggle_card
+      properties:
+        title: Mono Audio
+        icon: audio-card-symbolic
+        key: mono_audio
+      on_toggle:
+        enabled:
+          type: exec
+          command: $HOME/user_scripts/audio/mono_audio_pipewire.sh
+          terminal: false
+        disabled:
+          type: exec
+          command: $HOME/user_scripts/audio/mono_audio_pipewire.sh
+          terminal: false
+    - type: grid_card
+      properties:
+        title: Shazam
+        icon: media-record-symbolic
+      on_press:
+        type: exec
+        command: $HOME/user_scripts/music/recognition.sh
+        terminal: false
+    - type: toggle_card
+      properties:
+        title: Wayclick
+        icon: input-keyboard-symbolic
+        key: wayclick
+      on_toggle:
+        enabled:
+          type: exec
+          command: $HOME/user_scripts/wayclick/wayclick.sh
+          terminal: false
+        disabled:
+          type: exec
+          command: $HOME/user_scripts/wayclick/wayclick.sh
+          terminal: false
+
   - type: section
     properties:
       title: Controls
@@ -708,78 +761,19 @@ pages:
         type: exec
         command: $HOME/user_scripts/audio/mic_switch.sh
         terminal: false
-  - type: section
-    properties:
-      title: Effects & Tools
-      icon: ''
-      description: ''
-    items:
-    - type: toggle
-      properties:
-        title: Mono Audio
-        description: Toggle Mono/Stereo output
-        icon: audio-card-symbolic
-        key: mono_audio
-      on_toggle:
-        enabled:
-          type: exec
-          command: $HOME/user_scripts/audio/mono_audio_pipewire.sh
-          terminal: false
-        disabled:
-          type: exec
-          command: $HOME/user_scripts/audio/mono_audio_pipewire.sh
-          terminal: false
-    - type: button
-      properties:
-        title: Music Recognition
-        description: Identify song playing now
-        icon: media-record-symbolic
-        button_text: "Identify"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/music/recognition.sh
-        terminal: false
-    - type: toggle
-      properties:
-        title: Wayclick
-        description: Enable mechanical keyboard sound effects
-        icon: input-keyboard-symbolic
-        key: wayclick
-      on_toggle:
-        enabled:
-          type: exec
-          command: $HOME/user_scripts/wayclick/wayclick.sh
-          terminal: false
-        disabled:
-          type: exec
-          command: $HOME/user_scripts/wayclick/wayclick.sh
-          terminal: false
 
 - id: visuals
   title: Visuals
   icon: applications-graphics-symbolic
   layout:
-  - type: section
+  - type: grid_section
     properties:
-      title: Theming
-      icon: ''
-      description: ''
+      title: Quick Visuals
     items:
-    - type: button
-      properties:
-        title: Cycle Theme
-        description: Generate colors from random wallpaper
-        icon: palette-symbolic
-        button_text: "Cycle"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/theme_matugen/theme_ctl.sh random
-        terminal: false
-    - type: toggle
+    - type: toggle_card
       properties:
         title: Dark Mode
         icon: weather-clear-night-symbolic
-        description: Enable/Disable Dark Mode
         key: dusky_theme/state
         key_inverse: true
         save_as_int: true
@@ -792,6 +786,35 @@ pages:
           type: exec
           command: $HOME/user_scripts/theme_matugen/theme_ctl.sh set --mode light
           terminal: false
+    - type: toggle_card
+      properties:
+        title: Blur
+        icon: view-reveal-symbolic
+        key: opacity_blur
+      on_toggle:
+        enabled:
+          type: exec
+          command: $HOME/user_scripts/hypr/hypr_blur_opacity_shadow_toggle.sh
+          terminal: false
+        disabled:
+          type: exec
+          command: $HOME/user_scripts/hypr/hypr_blur_opacity_shadow_toggle.sh
+          terminal: false
+    - type: grid_card
+      properties:
+        title: Cycle Theme
+        icon: palette-symbolic
+      on_press:
+        type: exec
+        command: $HOME/user_scripts/theme_matugen/theme_ctl.sh random
+        terminal: false
+
+  - type: section
+    properties:
+      title: Theming
+      icon: ''
+      description: ''
+    items:
     - type: button
       properties:
         title: Regenerate Color Files
@@ -864,16 +887,6 @@ pages:
       on_press:
         type: exec
         command: rofi -show animations -modi "animations:$HOME/user_scripts/rofi/hypr_anim.sh"
-        terminal: false
-    - type: button
-      properties:
-        title: Toggle Blur/Opacity
-        description: Quick toggle for window effects
-        icon: view-reveal-symbolic
-        button_text: "Toggle"
-      on_press:
-        type: exec
-        command: $HOME/user_scripts/hypr/hypr_blur_opacity_shadow_toggle.sh
         terminal: false
   - type: section
     properties:
