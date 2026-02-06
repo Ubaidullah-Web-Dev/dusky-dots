@@ -1038,328 +1038,354 @@ pages:
   layout:
   - type: section
     properties:
-      title: User Customizations
-      description: "TUI: User-friendly menu | File: Raw text editor"
+      title: Core Configuration
       icon: ''
+      description: Main system settings
     items:
-    - type: button
+    - type: navigation
       properties:
-        title: Main Config
-        description: Edit hyprland.conf (User Override)
+        title: User Customizations
+        description: Main Hyprland config and Keybinds
         icon: preferences-desktop-symbolic
-        button_text: "File"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/hyprland.conf"
-        terminal: false
+      layout:
+        - type: section
+          properties:
+            title: User Customizations
+            description: "TUI: User-friendly menu | File: Raw text editor"
+          items:
+            - type: button
+              properties:
+                title: Main Config
+                description: Edit hyprland.conf (User Override)
+                icon: preferences-desktop-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/edit_here/hyprland.conf"
+                terminal: false
+            - type: button
+              properties:
+                title: Keybinds
+                description: Edit custom keybindings
+                icon: input-keyboard-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/keybinds.conf"
+                  - icon: input-keyboard-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_keybinds.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_keybinds.sh"
 
-    - type: button
+    - type: navigation
       properties:
-        title: Keybinds
-        description: Edit custom keybindings
-        icon: input-keyboard-symbolic
-        buttons:
-          - icon: text-x-script-symbolic
-            button_text: "File"
-            on_press:
-              type: exec
-              command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/keybinds.conf"
-          - icon: input-keyboard-symbolic
-            button_text: "TUI"
-            style: suggested
-            on_press:
-              type: exec
-              command: kitty --class dusky_keybinds.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_keybinds.sh"
-
-  - type: section
-    properties:
-      title: Environment Variables
-      description: UWSM and Hyprland environment settings
-      icon: text-x-script-symbolic
-    items:
-    - type: button
-      properties:
-        title: User Environment
-        description: ~/.config/hypr/edit_here/source/environment_variables.conf
+        title: Environment Variables
+        description: UWSM and Hyprland environment settings
         icon: text-x-script-symbolic
-        button_text: "File"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/environment_variables.conf"
-    - type: button
-      properties:
-        title: UWSM Global
-        description: ~/.config/uwsm/env
-        icon: text-x-script-symbolic
-        button_text: "File"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/uwsm/env"
-    - type: button
-      properties:
-        title: UWSM Hyprland
-        description: ~/.config/uwsm/env-hyprland
-        icon: text-x-script-symbolic
-        button_text: "File"
-      on_press:
-        type: exec
-        command: gnome-text-editor "$HOME/.config/uwsm/env-hyprland"
-    - type: button
-      properties:
-        title: Auto Configure GPU
-        description: Detect and set GPU vars (UWSM)
-        icon: preferences-desktop-display-symbolic
-        style: suggested
-        button_text: "Run"
-      on_press:
-        type: exec
-        command: kitty --class 000_configure_uwsm_gpu.sh --hold sh -c "$HOME/user_scripts/arch_setup_scripts/scripts/000_configure_uwsm_gpu.sh"
-    - type: button
-      properties:
-        title: Disable GPU Vars
-        description: Comment out all GPU variables
-        icon: edit-delete-symbolic
-        style: destructive
-        button_text: "Run"
-      on_press:
-        type: exec
-        command: kitty --class 000_uwsm_env_comment.sh --hold sh -c "$HOME/user_scripts/arch_setup_scripts/scripts/000_uwsm_env_comment.sh"
+      layout:
+        - type: section
+          properties:
+            title: Environment Variables
+          items:
+            - type: button
+              properties:
+                title: User Environment
+                description: ~/.config/hypr/edit_here/source/environment_variables.conf
+                icon: text-x-script-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/environment_variables.conf"
+            - type: button
+              properties:
+                title: UWSM Global
+                description: ~/.config/uwsm/env
+                icon: text-x-script-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/uwsm/env"
+            - type: button
+              properties:
+                title: UWSM Hyprland
+                description: ~/.config/uwsm/env-hyprland
+                icon: text-x-script-symbolic
+                button_text: "File"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/uwsm/env-hyprland"
+            - type: button
+              properties:
+                title: Auto Configure GPU
+                description: Detect and set GPU vars (UWSM)
+                icon: preferences-desktop-display-symbolic
+                style: suggested
+                button_text: "Run"
+              on_press:
+                type: exec
+                command: kitty --class 000_configure_uwsm_gpu.sh --hold sh -c "$HOME/user_scripts/arch_setup_scripts/scripts/000_configure_uwsm_gpu.sh"
+            - type: button
+              properties:
+                title: Disable GPU Vars
+                description: Comment out all GPU variables
+                icon: edit-delete-symbolic
+                style: destructive
+                button_text: "Run"
+              on_press:
+                type: exec
+                command: kitty --class 000_uwsm_env_comment.sh --hold sh -c "$HOME/user_scripts/arch_setup_scripts/scripts/000_uwsm_env_comment.sh"
 
-  - type: section
-    properties:
-      title: Window Management
-      icon: preferences-system-windows-symbolic
-    items:
-    - type: button
+    - type: navigation
       properties:
-        title: Monitors
-        description: Edit monitor configuration
-        icon: video-display-symbolic
-        buttons:
-          - icon: text-x-script-symbolic
-            button_text: "File"
-            on_press:
-              type: exec
-              command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/monitors.conf"
-          - icon: video-display-symbolic
-            button_text: "TUI"
-            style: suggested
-            on_press:
-              type: exec
-              command: kitty --class dusky_monitor.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_monitor.sh"
+        title: Window Management
+        description: Monitors, Window Rules, Input
+        icon: preferences-system-windows-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Window Management
+          items:
+            - type: button
+              properties:
+                title: Monitors
+                description: Edit monitor configuration
+                icon: video-display-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/monitors.conf"
+                  - icon: video-display-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_monitor.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_monitor.sh"
+            - type: button
+              properties:
+                title: Window Rules
+                description: Edit window rules
+                icon: application-x-addon-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/window_rules.conf"
+                  - icon: application-x-addon-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_window_rules.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_window_rules.sh"
+            - type: button
+              properties:
+                title: Input
+                description: Edit input configuration
+                icon: input-mouse-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/input.conf"
+                  - icon: input-mouse-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_input.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_input.sh"
 
-    - type: button
+    - type: navigation
       properties:
-        title: Window Rules
-        description: Edit window rules
-        icon: application-x-addon-symbolic
-        buttons:
-          - icon: text-x-script-symbolic
-            button_text: "File"
-            on_press:
-              type: exec
-              command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/window_rules.conf"
-          - icon: application-x-addon-symbolic
-            button_text: "TUI"
-            style: suggested
-            on_press:
-              type: exec
-              command: kitty --class dusky_window_rules.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_window_rules.sh"
-
-    - type: button
-      properties:
-        title: Input
-        description: Edit input configuration
-        icon: input-mouse-symbolic
-        buttons:
-          - icon: text-x-script-symbolic
-            button_text: "File"
-            on_press:
-              type: exec
-              command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/input.conf"
-          - icon: input-mouse-symbolic
-            button_text: "TUI"
-            style: suggested
-            on_press:
-              type: exec
-              command: kitty --class dusky_input.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_input.sh"
-
-  - type: section
-    properties:
-      title: Visuals & Idle
-      icon: applications-graphics-symbolic
-    items:
-    - type: button
-      properties:
-        title: Appearance
-        description: Edit visual settings
+        title: Visuals & Idle
+        description: Appearance and Hypridle
         icon: applications-graphics-symbolic
-        buttons:
-          - icon: text-x-script-symbolic
-            button_text: "File"
-            on_press:
-              type: exec
-              command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/appearance.conf"
-          - icon: applications-graphics-symbolic
-            button_text: "TUI"
-            style: suggested
-            on_press:
-              type: exec
-              command: kitty --class dusky_appearances.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_appearances.sh"
-
-    - type: button
-      properties:
-        title: Hypridle
-        description: Edit idle daemon config
-        icon: preferences-system-time-symbolic
-        buttons:
-          - icon: text-x-script-symbolic
-            button_text: "File"
-            on_press:
-              type: exec
-              command: gnome-text-editor "$HOME/.config/hypr/hypridle.conf"
-          - icon: preferences-system-time-symbolic
-            button_text: "TUI"
-            style: suggested
-            on_press:
-              type: exec
-              command: kitty --class dusky_hypridle.sh --hold sh -c "$HOME/user_scripts/hypridle/dusky_hypridle.sh"
-
-  - type: section
-    properties:
-      title: System Defaults (Read Only)
-      icon: ''
-      description: "WARNING: Reference configurations only"
-    items:
-    - type: expander
-      properties:
-        title: Dusky Default Hyprland
-        description: "WARNING: Read Only - System Defaults"
-        icon: dialog-warning-symbolic
-      items:
-      - type: button
-        properties:
-          title: Hyprland.conf
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/hypr/hyprland.conf"
-      - type: button
-        properties:
-          title: Environment Variables
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/hypr/source/environment_variables.conf"
-      - type: button
-        properties:
-          title: Appearance
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/hypr/source/appearance.conf"
-      - type: button
-        properties:
-          title: Autostart
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/hypr/source/autostart.conf"
-      - type: button
-        properties:
-          title: Keybinds
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/hypr/source/keybinds.conf"
-      - type: button
-        properties:
-          title: Window Rules
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/hypr/source/window_rules.conf"
-      - type: button
-        properties:
-          title: Input
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/hypr/source/input.conf"
+      layout:
+        - type: section
+          properties:
+            title: Visuals & Idle
+          items:
+            - type: button
+              properties:
+                title: Appearance
+                description: Edit visual settings
+                icon: applications-graphics-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/edit_here/source/appearance.conf"
+                  - icon: applications-graphics-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_appearances.sh --hold sh -c "$HOME/user_scripts/hypr/dusky_appearances.sh"
+            - type: button
+              properties:
+                title: Hypridle
+                description: Edit idle daemon config
+                icon: preferences-system-time-symbolic
+                buttons:
+                  - icon: text-x-script-symbolic
+                    button_text: "File"
+                    on_press:
+                      type: exec
+                      command: gnome-text-editor "$HOME/.config/hypr/hypridle.conf"
+                  - icon: preferences-system-time-symbolic
+                    button_text: "TUI"
+                    style: suggested
+                    on_press:
+                      type: exec
+                      command: kitty --class dusky_hypridle.sh --hold sh -c "$HOME/user_scripts/hypridle/dusky_hypridle.sh"
 
   - type: section
     properties:
-      title: Status Bar (Waybar)
+      title: Component Configs
       icon: ''
-      description: Waybar Reference
+      description: Specific component settings
     items:
-    - type: expander
+    - type: navigation
       properties:
-        title: Waybar Configs
-        description: Reference Only
+        title: Status Bar (Waybar)
+        description: Configure Waybar layout and style
+        icon: view-more-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Waybar Configs
+          items:
+            - type: button
+              properties:
+                title: Waybar Config
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/waybar/config.jsonc"
+            - type: button
+              properties:
+                title: Waybar Style
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/waybar/style.css"
+
+    - type: navigation
+      properties:
+        title: Notifications (SwayNC)
+        description: Configure notification center
         icon: preferences-system-notifications-symbolic
-      items:
-      - type: button
-        properties:
-          title: Waybar Config
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/waybar/config.jsonc"
-      - type: button
-        properties:
-          title: Waybar Style
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/waybar/style.css"
+      layout:
+        - type: section
+          properties:
+            title: SwayNC Configs
+          items:
+            - type: button
+              properties:
+                title: SwayNC Config
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/swaync/config.json"
+            - type: button
+              properties:
+                title: SwayNC Style
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/swaync/style.css"
 
-  - type: section
-    properties:
-      title: Notifications (SwayNC)
-      icon: ''
-      description: SwayNC Reference
-    items:
-    - type: expander
+    - type: navigation
       properties:
-        title: SwayNC Configs
-        description: Reference Only
-        icon: preferences-system-notifications-symbolic
-      items:
-      - type: button
-        properties:
-          title: SwayNC Config
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/swaync/config.json"
-      - type: button
-        properties:
-          title: SwayNC Style
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/swaync/style.css"
-
-  - type: section
-    properties:
-      title: Theming (Matugen)
-      icon: ''
-      description: Matugen Reference
-    items:
-    - type: expander
-      properties:
-        title: Matugen Config
-        description: Reference Only
+        title: Theming (Matugen)
+        description: Material You theme generation config
         icon: palette-symbolic
-      items:
-      - type: button
-        properties:
-          title: Matugen Config.toml
-          button_text: "View"
-        on_press:
-          type: exec
-          command: gnome-text-editor "$HOME/.config/matugen/config.toml"
+      layout:
+        - type: section
+          properties:
+            title: Matugen Config
+          items:
+            - type: button
+              properties:
+                title: Matugen Config.toml
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/matugen/config.toml"
+
+  - type: section
+    properties:
+      title: Reference
+      icon: ''
+      description: System defaults
+    items:
+    - type: navigation
+      properties:
+        title: System Defaults (Read Only)
+        description: View default configuration files
+        icon: dialog-warning-symbolic
+      layout:
+        - type: section
+          properties:
+            title: Dusky Default Hyprland
+            description: "WARNING: Read Only - System Defaults"
+          items:
+            - type: button
+              properties:
+                title: Hyprland.conf
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/hyprland.conf"
+            - type: button
+              properties:
+                title: Environment Variables
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/environment_variables.conf"
+            - type: button
+              properties:
+                title: Appearance
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/appearance.conf"
+            - type: button
+              properties:
+                title: Autostart
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/autostart.conf"
+            - type: button
+              properties:
+                title: Keybinds
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/keybinds.conf"
+            - type: button
+              properties:
+                title: Window Rules
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/window_rules.conf"
+            - type: button
+              properties:
+                title: Input
+                button_text: "View"
+              on_press:
+                type: exec
+                command: gnome-text-editor "$HOME/.config/hypr/source/input.conf"
 
 - id: keybinds
   title: Keybinds
