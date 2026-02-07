@@ -19,6 +19,7 @@ readonly CONFIG_FILE="${CONFIG_DIR}/keybinds.conf"
 readonly MARKER_START='# -- TERMINAL-CLIPBOARD-START --'
 readonly MARKER_END='# -- TERMINAL-CLIPBOARD-END --'
 readonly BIND_SIGNATURE='toggle_terminal_clipboard.sh'
+readonly STATE_FILE="${HOME}/.config/dusky/settings/clipboard_state"
 
 # ------------------------------------------------------------------------------
 # Terminal Colors (Conditional on TTY)
@@ -171,6 +172,10 @@ enable_terminal_mode() {
         info "Configuration appended to ${CONFIG_FILE}"
     fi
 
+    # Update state file
+    mkdir -p "${STATE_FILE%/*}"
+    printf 'True' > "${STATE_FILE}"
+
     success "Terminal Clipboard enabled."
 }
 
@@ -182,8 +187,17 @@ enable_rofi_mode() {
 
     if has_marker_block; then
         modify_config_block "comment"
+        
+        # Update state file
+        mkdir -p "${STATE_FILE%/*}"
+        printf 'False' > "${STATE_FILE}"
+
         success "Rofi Clipboard enabled (Terminal config commented out)."
     else
+        # Update state file
+        mkdir -p "${STATE_FILE%/*}"
+        printf 'False' > "${STATE_FILE}"
+
         success "System is already using Rofi Clipboard (no Terminal config present)."
     fi
 }
