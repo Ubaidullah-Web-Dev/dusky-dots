@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #══════════════════════════════════════════════════════════════════════════════
-# HyprMonitorWizard v7.4.4 — Fix misc block saving (restored bash logic)
+# HyprMonitorWizard v7.4.5 — Restored Robustness (Regex, Cleanup, Verbose)
 # A robust, strictly typed monitor configuration tool for Hyprland.
 #══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -8,7 +8,7 @@ set -euo pipefail
 #───────────────────────────────────────────────────────────────────────────────
 # CONSTANTS & PATHS
 #───────────────────────────────────────────────────────────────────────────────
-readonly VERSION="7.4.4"
+readonly VERSION="7.4.5"
 readonly CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/edit_here"
 # Backups stored in volatile /tmp (cleared on reboot)
 readonly BACKUP_DIR="/tmp/hypr-wizard-backups"
@@ -19,15 +19,18 @@ readonly MAX_BACKUPS=20
 readonly RST=$'\e[0m'    RED=$'\e[31m'   GRN=$'\e[32m'   YLW=$'\e[33m'
 readonly BLU=$'\e[34m'   CYN=$'\e[36m'   BLD=$'\e[1m'    DIM=$'\e[2m'
 
-# State tracking for atomic writes (Only used for misc options now)
-declare TEMP_FILE=""
+# State tracking for atomic writes (Restored array-based cleanup)
+declare -a TEMP_FILES=()
 
 #───────────────────────────────────────────────────────────────────────────────
 # ERROR HANDLING & CLEANUP
 #───────────────────────────────────────────────────────────────────────────────
 cleanup() {
-    # Clean up global temp file if it exists
-    [[ -n "$TEMP_FILE" && -f "$TEMP_FILE" ]] && rm -f -- "$TEMP_FILE"
+    # Clean up all registered temp files
+    local f
+    for f in "${TEMP_FILES[@]}"; do
+        [[ -f "$f" ]] && rm -f -- "$f"
+    done
 }
 trap cleanup EXIT
 
@@ -130,6 +133,28 @@ set_misc_runtime() {
     hyprctl keyword "misc:$option" "$value" &>/dev/null || :
 }
 
+# ══════════════════════════════════════════════════════════════════════════════
+# RESTORED: ROBUST UTILS (Regex & Temp Handling)
+# ══════════════════════════════════════════════════════════════════════════════
+escape_regex() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\[/\\[}"
+    s="${s//\]/\\]}"
+    s="${s//./\\.}"
+    s="${s//^/\\^}"
+    s="${s//\$/\\$}"
+    s="${s//\*/\\*}"
+    printf '%s' "$s"
+}
+
+make_temp() {
+    local tmp
+    tmp=$(mktemp) || die "Filesystem error: cannot create temp file"
+    TEMP_FILES+=("$tmp")
+    printf '%s' "$tmp"
+}
+
 #───────────────────────────────────────────────────────────────────────────────
 # BACKUP & PERSISTENCE
 #───────────────────────────────────────────────────────────────────────────────
@@ -154,23 +179,20 @@ create_backup() {
     fi
 }
 
-make_temp() {
-    cleanup
-    TEMP_FILE=$(mktemp) || die "Filesystem error: cannot create temp file"
-}
-
 # ══════════════════════════════════════════════════════════════════════════════
-# RESTORED: ROBUST SAVE FUNCTION (From v5.6)
+# RESTORED: ROBUST SAVE FUNCTION (With Regex Sanitization)
 # ══════════════════════════════════════════════════════════════════════════════
 save_monitor_rule() {
     local name="$1" rule="$2"
     create_backup
 
-    # Use local temp file directly to avoid global state issues
+    # Use robust temp creation
     local tmp
-    tmp=$(mktemp) || die "Filesystem error: cannot create temp file"
+    tmp=$(make_temp)
 
-    local escaped_name="${name//./\\.}"
+    # RESTORED: Robust Regex Escaping
+    local escaped_name
+    escaped_name=$(escape_regex "$name")
     
     # CRITICAL: '|| true' prevents set -e from killing script if grep finds nothing
     grep -v "^[[:space:]]*monitor[[:space:]]*=[[:space:]]*${escaped_name}[,[:space:]]" \
@@ -182,14 +204,14 @@ save_monitor_rule() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# FIXED: RESTORED BASH-BASED MISC SAVE (From v5.6)
+# RESTORED: ROBUST MISC SAVE (With Temp Handling)
 # ══════════════════════════════════════════════════════════════════════════════
 save_misc_option() {
     local option="$1" value="$2"
     create_backup
 
     local tmp in_misc=0 found=0 line
-    tmp=$(mktemp) || die "Filesystem error: cannot create temp file"
+    tmp=$(make_temp)
 
     if grep -q "^[[:space:]]*misc[[:space:]]*{" "$CONFIG_FILE" 2>/dev/null; then
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -392,19 +414,52 @@ get_position() {
 
 apply_monitor_config() {
     local monitor_name="$1" config_string="$2"
-    # We remove the post-calculation variables since the script might hang after applying
+    
+    # ══════════════════════════════════════════════════════════════════════════
+    # RESTORED: VERBOSE ANALYSIS (Before/After)
+    # ══════════════════════════════════════════════════════════════════════════
+    local before_hz before_scale after_hz after_scale
+    
+    # Capture state BEFORE
+    IFS=' ' read -r before_hz before_scale < <(
+        get_active_json | jq -r --arg n "$monitor_name" \
+            '.[] | select(.name==$n) | "\(.refreshRate) \(.scale)"'
+    )
+    
     print_header "Applying Configuration"
     printf '%sTarget Rule:%s monitor = %s\n\n' "$DIM" "$RST" "$config_string"
-    # 1. Ask for confirmation BEFORE the dangerous operation (flashing)
+    printf '%sCurrent State:%s %sHz, Scale: %s\n\n' "$DIM" "$RST" "${before_hz:-?}" "${before_scale:-?}"
+
     if confirm "Write configuration to file and Apply? (Screen will flash)"; then
-        # 2. Save to disk FIRST (Persist state before potential hang)
+        # Save to disk
         save_monitor_rule "$monitor_name" "monitor = $config_string"
-        # 3. Apply changes LAST
+        
         info "Applying changes..."
         hyprctl keyword monitor "$config_string" &>/dev/null || :
-        # If the terminal survives the flash, we acknowledge it.
-        # If it hangs here, the user is safe because the file is already saved.
-        ok "Configuration applied successfully."
+        
+        # Give Hyprland a moment to adjust
+        sleep 0.5
+        
+        # Capture state AFTER
+        IFS=' ' read -r after_hz after_scale < <(
+            get_active_json | jq -r --arg n "$monitor_name" \
+                '.[] | select(.name==$n) | "\(.refreshRate) \(.scale)"'
+        )
+        
+        # VERBOSE REPORT
+        printf '\n%s%s=== Configuration Report ===%s\n' "$CYN" "$BLD" "$RST"
+        printf '  Monitor: %s\n' "$monitor_name"
+        printf '  Refresh: %s -> %s%s%s\n' \
+            "${before_hz:-?}" "$GRN" "${after_hz:-?}" "$RST"
+        printf '  Scale:   %s -> %s%s%s\n' \
+            "${before_scale:-?}" "$GRN" "${after_scale:-?}" "$RST"
+            
+        if [[ "$before_hz" == "$after_hz" && "$before_scale" == "$after_scale" ]]; then
+            warn "Settings appear unchanged. (This is normal if the monitor was already optimized)."
+        else
+            ok "Settings applied successfully."
+        fi
+        
         pause
     else
         warn "Operation cancelled. No changes made."
