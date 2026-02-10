@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Dusky TUI Engine - Hybrid Master v3.3.2 (Space Bug Fix)
+# Dusky TUI Engine - Hybrid Master v3.5.2 (Precision & Safety + Config Fix)
 # -----------------------------------------------------------------------------
 # Target: Arch Linux / Hyprland / UWSM / Wayland
 #
-# HYBRID SPECIFICATION:
-#   - LOGIC CORE: v2.8.2 (Restored to handle split/nested blocks correctly)
-#   - INTERFACE:  v3.2.4 (Modern, stable, high-precision, crash-proof)
-#   - SAFETY:     v3.2.4 (Bash 5.0+, Scoped Locales, Signal Traps)
-#
-# v3.3.2 CHANGELOG:
-#   - FIX: Removed trailing space in sed replacement that caused whitespace 
-#     accumulation after multiple edits.
+# v3.5.2 CHANGELOG:
+#   - FIX:  Corrected Submenu registration to match parsing logic.
+#           (Changed 'input:touchpad' -> 'touchpad' and fixed key names).
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -23,12 +18,12 @@ set -euo pipefail
 # POINT THIS TO YOUR REAL CONFIG FILE
 readonly CONFIG_FILE="${HOME}/.config/hypr/change_me.conf"
 readonly APP_TITLE="Input Config Editor"
-readonly APP_VERSION="v3.3.2 (Hybrid)"
+readonly APP_VERSION="v3.5.2 (Fixed)"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=14
 declare -ri BOX_INNER_WIDTH=76
-declare -ri ADJUST_THRESHOLD=38 # Kept v3.2.4 Fix: Better mouse hitbox
+declare -ri ADJUST_THRESHOLD=38
 declare -ri ITEM_PADDING=32
 
 declare -ri HEADER_ROWS=4
@@ -38,7 +33,6 @@ declare -ri ITEM_START_ROW=$(( HEADER_ROWS + 1 ))
 declare -ra TABS=("General" "Input" "Display" "Misc")
 
 # Item Registration
-# NOTE: For nested blocks (e.g. input { touchpad }), use the LEAF name "touchpad".
 register_items() {
     # Tab 0: General
     register 0 "Enable Logs"    'logs_enabled|bool|general|||'          "true"
@@ -53,14 +47,22 @@ register_items() {
     register 2 "Blur Enabled"   'blur|bool|decoration|||'              "true"
     
     # Tab 3: Misc
+    # 'menu' type item. The 'key' (advanced_settings) is used as the Menu ID.
+    register 3 "Advanced Settings" 'advanced_settings|menu||||'        ""
+    
+    # Submenu Items (registered to parent ID "advanced_settings")
+    # CRITICAL FIX: Block name changed from 'input:touchpad' to 'touchpad'.
+    # CRITICAL FIX: Key names changed (e.g., 'touchpad:enabled' -> 'enabled').
+    register_child "advanced_settings" "Touchpad Enable"  'enabled|bool|touchpad|||' "true"
+    register_child "advanced_settings" "Scroll Factor"    'scroll_factor|float|touchpad|0.1|5.0|0.1' "1.0"
+    register_child "advanced_settings" "Tap to Click"     'tap-to-click|bool|touchpad|||' "true"
+    
     register 3 "Shadow Color"   'col.shadow|cycle|general|0xee1a1a1a,0xff000000||' "0xee1a1a1a"
 }
 
 # Post-Write Hook
 post_write_action() {
-    # Example: Reload Waybar or Hyprland
-    # pgrep -x waybar >/dev/null && killall -SIGUSR2 waybar
-    : 
+    : # Reload command here
 }
 
 # =============================================================================
@@ -92,6 +94,9 @@ readonly CURSOR_SHOW=$'\033[?25h'
 readonly MOUSE_ON=$'\033[?1000h\033[?1002h\033[?1006h'
 readonly MOUSE_OFF=$'\033[?1000l\033[?1002l\033[?1006l'
 
+# ANSI stripping regex pattern
+readonly _ESC=$'\033'
+
 readonly ESC_READ_TIMEOUT=0.05
 readonly UNSET_MARKER='«unset»'
 
@@ -103,12 +108,19 @@ declare -ri TAB_COUNT=${#TABS[@]}
 declare -a TAB_ZONES=()
 declare ORIGINAL_STTY=""
 
+# View State
+declare -i CURRENT_VIEW=0      # 0=Main List, 1=Detail/Sub-Page
+declare CURRENT_MENU_ID=""     # ID of the currently open menu
+declare -i PARENT_ROW=0        # Saved row to return to
+declare -i PARENT_SCROLL=0     # Saved scroll to return to
+
 # --- Data Structures ---
 declare -A ITEM_MAP=()
 declare -A VALUE_CACHE=()
 declare -A CONFIG_CACHE=()
 declare -A DEFAULTS=()
 
+# Initialize Tab arrays
 for (( _ti = 0; _ti < TAB_COUNT; _ti++ )); do
     declare -ga "TAB_ITEMS_${_ti}=()"
 done
@@ -132,14 +144,14 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# --- Regex Helpers (v2.8.2 Logic Compatible) ---
+# --- Logic Helpers ---
 
 escape_sed_replacement() {
     local _esc_input=$1
     local -n _esc_out_ref=$2
     _esc_input=${_esc_input//\\/\\\\}
     _esc_input=${_esc_input//|/\\|}
-    _esc_input=${_esc_input//&/\\&}      # Kept security fix for &
+    _esc_input=${_esc_input//&/\\&}
     _esc_input=${_esc_input//$'\n'/\\n}
     _esc_out_ref=$_esc_input
 }
@@ -158,33 +170,63 @@ escape_sed_pattern() {
     _esc_out_ref=$_esc_input
 }
 
-# --- Core Logic Engine (v2.8.2 Logic / v3.2.4 Hygiene) ---
+# --- Core Logic Engine ---
 
 register() {
     local -i tab_idx=$1
     local label=$2 config=$3 default_val=${4:-}
-
     local key type block min max step
     IFS='|' read -r key type block min max step <<< "$config"
 
     case "$type" in
-        bool|int|float|cycle) ;;
+        bool|int|float|cycle|menu) ;;
         *) log_err "Invalid type for '${label}': ${type}"; exit 1 ;;
     esac
 
-    if (( tab_idx < 0 || tab_idx >= TAB_COUNT )); then
-        log_err "Tab index ${tab_idx} out of bounds (0-$(( TAB_COUNT - 1 )))"; exit 1
-    fi
-
     ITEM_MAP["${tab_idx}::${label}"]=$config
     [[ -n "$default_val" ]] && DEFAULTS["${tab_idx}::${label}"]=$default_val
-
     local -n _reg_tab_ref="TAB_ITEMS_${tab_idx}"
     _reg_tab_ref+=("$label")
 }
 
-# The "Brain" from v2.8.2 - Handles split blocks
-# UPDATE v3.3.1: Scoped LC_NUMERIC=C to awk command (Hygiene Fix)
+register_child() {
+    local parent_id=$1
+    local label=$2 config=$3 default_val=${4:-}
+    
+    # Initialize submenu array if it doesn't exist
+    if ! declare -p "SUBMENU_ITEMS_${parent_id}" &>/dev/null; then
+        declare -ga "SUBMENU_ITEMS_${parent_id}=()"
+    fi
+
+    # Map item using Parent ID as context
+    ITEM_MAP["${parent_id}::${label}"]=$config
+    [[ -n "$default_val" ]] && DEFAULTS["${parent_id}::${label}"]=$default_val
+    
+    local -n _child_ref="SUBMENU_ITEMS_${parent_id}"
+    _child_ref+=("$label")
+}
+
+strip_ansi() {
+    local s="$1"
+    local result=""
+    while [[ -n "$s" ]]; do
+        if [[ "$s" == "${_ESC}"* ]]; then
+            s="${s:1}"
+            if [[ "$s" == "["* ]]; then
+                s="${s:1}"
+                while [[ -n "$s" && ! "$s" =~ ^[a-zA-Z] ]]; do s="${s:1}"; done
+                [[ -n "$s" ]] && s="${s:1}"
+            else
+                [[ -n "$s" ]] && s="${s:1}"
+            fi
+        else
+            result+="${s:0:1}"
+            s="${s:1}"
+        fi
+    done
+    REPLY="$result"
+}
+
 populate_config_cache() {
     CONFIG_CACHE=()
     local key_part value_part key_name
@@ -192,7 +234,6 @@ populate_config_cache() {
     while IFS='=' read -r key_part value_part || [[ -n ${key_part:-} ]]; do
         [[ -z ${key_part:-} ]] && continue
         CONFIG_CACHE["$key_part"]=$value_part
-
         key_name=${key_part%%|*}
         if [[ -z ${CONFIG_CACHE["${key_name}|"]:-} ]]; then
             CONFIG_CACHE["${key_name}|"]=$value_part
@@ -203,7 +244,6 @@ populate_config_cache() {
         {
             line = $0
             sub(/#.*/, "", line)
-
             tmpline = line
             while (match(tmpline, /[a-zA-Z0-9_.:-]+[[:space:]]*\{/)) {
                 block_str = substr(tmpline, RSTART, RLENGTH)
@@ -212,7 +252,6 @@ populate_config_cache() {
                 block_stack[depth] = block_str
                 tmpline = substr(tmpline, RSTART + RLENGTH)
             }
-
             if (line ~ /=/) {
                 eq_pos = index(line, "=")
                 if (eq_pos > 0) {
@@ -226,74 +265,47 @@ populate_config_cache() {
                     }
                 }
             }
-
             n = gsub(/\}/, "}", line)
             while (n > 0 && depth > 0) { depth--; n-- }
         }
     ' "$CONFIG_FILE")
 }
 
-# The "Seeker" from v2.8.2 - Correctly finds keys in split/nested blocks
-# UPDATE v3.3.1: Scoped LC_NUMERIC=C to awk command (Hygiene Fix)
 find_key_line_in_block() {
     local block_name=$1 key_name=$2 file=$3
-
     LC_NUMERIC=C awk -v target_block="$block_name" -v target_key="$key_name" '
-    BEGIN {
-        depth = 0
-        in_target = 0
-        target_depth = 0
-        found = 0
-    }
+    BEGIN { depth = 0; in_target = 0; target_depth = 0; found = 0 }
     {
-        line = $0
-        clean = $0
-        sub(/#.*/, "", clean)
-
+        line = $0; clean = $0; sub(/#.*/, "", clean)
         tmpline = clean
         while (match(tmpline, /[a-zA-Z0-9_.:-]+[[:space:]]*\{/)) {
             block_str = substr(tmpline, RSTART, RLENGTH)
             sub(/[[:space:]]*\{/, "", block_str)
             depth++
             block_stack[depth] = block_str
-
-            if (block_str == target_block && !in_target) {
-                in_target = 1
-                target_depth = depth
-            }
+            if (block_str == target_block && !in_target) { in_target = 1; target_depth = depth }
             tmpline = substr(tmpline, RSTART + RLENGTH)
         }
-
         if (in_target && clean ~ /=/) {
             eq_pos = index(clean, "=")
             if (eq_pos > 0) {
                 k = substr(clean, 1, eq_pos - 1)
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
-                if (k == target_key) {
-                    print NR
-                    found = 1
-                }
+                if (k == target_key) { print NR; found = 1 }
             }
         }
-
         n = gsub(/\}/, "}", clean)
         while (n > 0 && depth > 0) {
-            if (in_target && depth == target_depth) {
-                in_target = 0
-                target_depth = 0
-            }
-            depth--
-            n--
+            if (in_target && depth == target_depth) { in_target = 0; target_depth = 0 }
+            depth--; n--
         }
     }
     ' "$file"
 }
 
-# The "Writer" from v2.8.2
 write_value_to_file() {
     local key=$1 new_val=$2 block=${3:-}
     local current_val=${CONFIG_CACHE["$key|$block"]:-}
-    
     [[ "$current_val" == "$new_val" ]] && return 0
 
     local safe_val safe_sed_key
@@ -303,52 +315,56 @@ write_value_to_file() {
     if [[ -n "$block" ]]; then
         local target_output
         target_output=$(find_key_line_in_block "$block" "$key" "$CONFIG_FILE")
-
-        if [[ -z "$target_output" ]]; then
-            return 1
-        fi
-        
+        if [[ -z "$target_output" ]]; then return 1; fi
         local target_line
         while IFS= read -r target_line; do
             [[ ! "$target_line" =~ ^[0-9]+$ ]] && continue
             (( target_line == 0 )) && continue
-
-            # FIX: Removed the trailing space after ${safe_val}
-            sed --follow-symlinks -i \
-                "${target_line}s|^\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\)[^#]*|\1${safe_val}|" \
-                "$CONFIG_FILE"
+            sed --follow-symlinks -i "${target_line}s|^\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\)[^#]*|\1${safe_val}|" "$CONFIG_FILE"
         done <<< "$target_output"
     else
-        # FIX: Removed the trailing space after ${safe_val}
-        sed --follow-symlinks -i \
-            "s|^\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\)[^#]*|\1${safe_val}|" \
-            "$CONFIG_FILE"
+        # Fix: Prevent ghost writes for missing global keys
+        if [[ -z "${CONFIG_CACHE["$key|"]:-}" ]]; then
+            return 1
+        fi
+        sed --follow-symlinks -i "s|^\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\)[^#]*|\1${safe_val}|" "$CONFIG_FILE"
     fi
 
     CONFIG_CACHE["$key|$block"]=$new_val
-    if [[ -z "$block" ]]; then
-        CONFIG_CACHE["$key|"]=$new_val
-    fi
+    if [[ -z "$block" ]]; then CONFIG_CACHE["$key|"]=$new_val; fi
     return 0
 }
 
-# Bridging the Cache formats
-load_tab_values() {
-    local -n _ltv_items_ref="TAB_ITEMS_${CURRENT_TAB}"
+# --- Context Helpers ---
+
+get_active_context() {
+    # Returns the active item list array name in REPLY_REF
+    # Returns the active context ID (for ITEM_MAP) in REPLY_CTX
+    if (( CURRENT_VIEW == 0 )); then
+        REPLY_CTX="${CURRENT_TAB}"
+        REPLY_REF="TAB_ITEMS_${CURRENT_TAB}"
+    else
+        REPLY_CTX="${CURRENT_MENU_ID}"
+        REPLY_REF="SUBMENU_ITEMS_${CURRENT_MENU_ID}"
+    fi
+}
+
+load_active_values() {
+    local REPLY_REF REPLY_CTX
+    get_active_context
+    local -n _lav_items_ref="$REPLY_REF"
     local item key type block val
 
-    for item in "${_ltv_items_ref[@]}"; do
-        IFS='|' read -r key type block _ _ _ <<< "${ITEM_MAP["${CURRENT_TAB}::${item}"]}"
-        
+    for item in "${_lav_items_ref[@]}"; do
+        IFS='|' read -r key type block _ _ _ <<< "${ITEM_MAP["${REPLY_CTX}::${item}"]}"
         val=${CONFIG_CACHE["$key|$block"]:-}
         if [[ -z "$val" && -z "$block" ]]; then
             val=${CONFIG_CACHE["$key|"]:-}
         fi
-        
         if [[ -z "$val" ]]; then
-            VALUE_CACHE["${CURRENT_TAB}::${item}"]=$UNSET_MARKER
+            VALUE_CACHE["${REPLY_CTX}::${item}"]=$UNSET_MARKER
         else
-            VALUE_CACHE["${CURRENT_TAB}::${item}"]=$val
+            VALUE_CACHE["${REPLY_CTX}::${item}"]=$val
         fi
     done
 }
@@ -356,13 +372,15 @@ load_tab_values() {
 modify_value() {
     local label=$1
     local -i direction=$2
-    local key type block min max step current new_val
+    local REPLY_REF REPLY_CTX
+    get_active_context
 
-    IFS='|' read -r key type block min max step <<< "${ITEM_MAP["${CURRENT_TAB}::${label}"]}"
-    current=${VALUE_CACHE["${CURRENT_TAB}::${label}"]:-}
+    local key type block min max step current new_val
+    IFS='|' read -r key type block min max step <<< "${ITEM_MAP["${REPLY_CTX}::${label}"]}"
+    current=${VALUE_CACHE["${REPLY_CTX}::${label}"]:-}
 
     if [[ "$current" == "$UNSET_MARKER" || -z "$current" ]]; then
-        current=${DEFAULTS["${CURRENT_TAB}::${label}"]:-}
+        current=${DEFAULTS["${REPLY_CTX}::${label}"]:-}
         [[ -z "$current" ]] && current=${min:-0}
     fi
 
@@ -377,13 +395,15 @@ modify_value() {
             ;;
         float)
             if [[ ! "$current" =~ ^-?[0-9]*\.?[0-9]+$ ]]; then current=${min:-0.0}; fi
-            # Using v3.2.4 improved precision logic (%.6g)
             new_val=$(LC_NUMERIC=C awk -v c="$current" -v dir="$direction" -v s="${step:-0.1}" \
                           -v mn="$min" -v mx="$max" 'BEGIN {
                 val = c + (dir * s)
                 if (mn != "" && val < mn) val = mn
                 if (mx != "" && val > mx) val = mx
-                printf "%.6g", val
+                str = sprintf("%.6f", val);
+                sub(/0+$/, "", str);
+                sub(/\.$/, "", str);
+                print str;
             }')
             ;;
         bool)
@@ -400,32 +420,37 @@ modify_value() {
             idx=$(( (idx + direction + count) % count ))
             new_val=${opts[idx]}
             ;;
+        menu) return 0 ;;
         *) return 0 ;;
     esac
 
     if write_value_to_file "$key" "$new_val" "$block"; then
-        VALUE_CACHE["${CURRENT_TAB}::${label}"]=$new_val
+        VALUE_CACHE["${REPLY_CTX}::${label}"]=$new_val
         post_write_action
     fi
 }
 
 set_absolute_value() {
     local label=$1 new_val=$2
+    local REPLY_REF REPLY_CTX
+    get_active_context
     local key type block
-    IFS='|' read -r key type block _ _ _ <<< "${ITEM_MAP["${CURRENT_TAB}::${label}"]}"
+    IFS='|' read -r key type block _ _ _ <<< "${ITEM_MAP["${REPLY_CTX}::${label}"]}"
     if write_value_to_file "$key" "$new_val" "$block"; then
-        VALUE_CACHE["${CURRENT_TAB}::${label}"]=$new_val
+        VALUE_CACHE["${REPLY_CTX}::${label}"]=$new_val
         return 0
     fi
     return 1
 }
 
 reset_defaults() {
-    local -n _rd_items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    local REPLY_REF REPLY_CTX
+    get_active_context
+    local -n _rd_items_ref="$REPLY_REF"
     local item def_val
     local -i any_written=0
     for item in "${_rd_items_ref[@]}"; do
-        def_val=${DEFAULTS["${CURRENT_TAB}::${item}"]:-}
+        def_val=${DEFAULTS["${REPLY_CTX}::${item}"]:-}
         if [[ -n "$def_val" ]]; then
             if set_absolute_value "$item" "$def_val"; then
                 any_written=1
@@ -436,10 +461,10 @@ reset_defaults() {
     return 0
 }
 
-# --- UI Rendering (v3.2.4 Modern) ---
+# --- UI Rendering ---
 
-draw_ui() {
-    local buf="" pad_buf="" padded_item="" item val display
+draw_main_view() {
+    local buf="" pad_buf="" padded_item="" item val display type config
     local -i i current_col=3 zone_start len count pad_needed
     local -i visible_len left_pad right_pad
     local -i visible_start visible_end
@@ -447,7 +472,9 @@ draw_ui() {
     buf+="${CURSOR_HOME}"
     buf+="${C_MAGENTA}┌${H_LINE}┐${C_RESET}"$'\n'
 
-    visible_len=$(( ${#APP_TITLE} + ${#APP_VERSION} + 1 ))
+    strip_ansi "$APP_TITLE"; local t_len=${#REPLY}
+    strip_ansi "$APP_VERSION"; local v_len=${#REPLY}
+    visible_len=$(( t_len + v_len + 1 ))
     left_pad=$(( (BOX_INNER_WIDTH - visible_len) / 2 ))
     right_pad=$(( BOX_INNER_WIDTH - visible_len - left_pad ))
 
@@ -485,6 +512,7 @@ draw_ui() {
     local -n _draw_items_ref="TAB_ITEMS_${CURRENT_TAB}"
     count=${#_draw_items_ref[@]}
 
+    # Scroll Logic
     if (( count == 0 )); then
         SELECTED_ROW=0; SCROLL_OFFSET=0
     else
@@ -513,12 +541,21 @@ draw_ui() {
     for (( i = visible_start; i < visible_end; i++ )); do
         item=${_draw_items_ref[i]}
         val=${VALUE_CACHE["${CURRENT_TAB}::${item}"]:-${UNSET_MARKER}}
-        case "$val" in
-            true)              display="${C_GREEN}ON${C_RESET}" ;;
-            false)             display="${C_RED}OFF${C_RESET}" ;;
-            "$UNSET_MARKER")   display="${C_YELLOW}⚠ UNSET${C_RESET}" ;;
-            *)                 display="${C_WHITE}${val}${C_RESET}" ;;
+        config=${ITEM_MAP["${CURRENT_TAB}::${item}"]}
+        IFS='|' read -r _ type _ _ _ _ <<< "$config"
+
+        case "$type" in
+            menu) display="${C_YELLOW}► ENTER${C_RESET}" ;;
+            *)
+                case "$val" in
+                    true)              display="${C_GREEN}ON${C_RESET}" ;;
+                    false)             display="${C_RED}OFF${C_RESET}" ;;
+                    "$UNSET_MARKER")   display="${C_YELLOW}⚠ UNSET${C_RESET}" ;;
+                    *)                 display="${C_WHITE}${val}${C_RESET}" ;;
+                esac
+                ;;
         esac
+
         printf -v padded_item "%-${ITEM_PADDING}s" "${item:0:${ITEM_PADDING}}"
         if (( i == SELECTED_ROW )); then
             buf+="${C_CYAN} ➤ ${C_INVERSE}${padded_item}${C_RESET} : ${display}${CLR_EOL}"$'\n'
@@ -543,16 +580,128 @@ draw_ui() {
         buf+="${CLR_EOL}"$'\n'
     fi
 
-    buf+=$'\n'"${C_CYAN} [Tab] Category  [r] Reset  [←/→ h/l] Adjust  [↑/↓ j/k] Nav  [q] Quit${C_RESET}"$'\n'
+    buf+=$'\n'"${C_CYAN} [Tab] Category  [r] Reset  [←/→ h/l] Adjust  [Enter] Action  [q] Quit${C_RESET}"$'\n'
     buf+="${C_CYAN} File: ${C_WHITE}${CONFIG_FILE}${C_RESET}${CLR_EOL}${CLR_EOS}"
     printf '%s' "$buf"
 }
 
-# --- Input Handling (v3.2.4 Modern) ---
+draw_detail_view() {
+    local buf="" pad_buf="" padded_item="" item val display type config
+    local -i i count pad_needed visible_start visible_end
+    local -i left_pad right_pad
+    
+    # 1. Header (Same Height as Main)
+    buf+="${CURSOR_HOME}"
+    buf+="${C_MAGENTA}┌${H_LINE}┐${C_RESET}${CLR_EOL}"$'\n'
+    
+    local title=" DETAIL VIEW "
+    local sub=" ${CURRENT_MENU_ID} "
+    strip_ansi "$title"; local t_len=${#REPLY}
+    strip_ansi "$sub"; local s_len=${#REPLY}
+    local vis_len=$(( t_len + s_len ))
+    left_pad=$(( (BOX_INNER_WIDTH - vis_len) / 2 ))
+    right_pad=$(( BOX_INNER_WIDTH - vis_len - left_pad ))
+
+    printf -v pad_buf '%*s' "$left_pad" ''
+    buf+="${C_MAGENTA}│${pad_buf}${C_YELLOW}${title}${C_GREY}${sub}${C_MAGENTA}"
+    printf -v pad_buf '%*s' "$right_pad" ''
+    buf+="${pad_buf}│${C_RESET}${CLR_EOL}"$'\n'
+    
+    # Breadcrumb line (replaces Tab line)
+    local breadcrumb=" « Back to ${TABS[CURRENT_TAB]}"
+    strip_ansi "$breadcrumb"; local b_len=${#REPLY}
+    pad_needed=$(( BOX_INNER_WIDTH - b_len ))
+    printf -v pad_buf '%*s' "$pad_needed" ''
+    
+    buf+="${C_MAGENTA}│${C_CYAN}${breadcrumb}${C_RESET}${pad_buf}${C_MAGENTA}│${C_RESET}${CLR_EOL}"$'\n'
+    buf+="${C_MAGENTA}└${H_LINE}┘${C_RESET}${CLR_EOL}"$'\n'
+    
+    # 2. Items (Logic copied from draw_main_view, targeting SUBMENU)
+    local -n _detail_items_ref="SUBMENU_ITEMS_${CURRENT_MENU_ID}"
+    count=${#_detail_items_ref[@]}
+
+    if (( count == 0 )); then
+        SELECTED_ROW=0; SCROLL_OFFSET=0
+    else
+        (( SELECTED_ROW < 0 )) && SELECTED_ROW=0
+        (( SELECTED_ROW >= count )) && SELECTED_ROW=$(( count - 1 ))
+        if (( SELECTED_ROW < SCROLL_OFFSET )); then
+            SCROLL_OFFSET=$SELECTED_ROW
+        elif (( SELECTED_ROW >= SCROLL_OFFSET + MAX_DISPLAY_ROWS )); then
+            SCROLL_OFFSET=$(( SELECTED_ROW - MAX_DISPLAY_ROWS + 1 ))
+        fi
+        local -i max_scroll=$(( count - MAX_DISPLAY_ROWS ))
+        (( max_scroll < 0 )) && max_scroll=0
+        (( SCROLL_OFFSET > max_scroll )) && SCROLL_OFFSET=$max_scroll
+    fi
+
+    visible_start=$SCROLL_OFFSET
+    visible_end=$(( SCROLL_OFFSET + MAX_DISPLAY_ROWS ))
+    (( visible_end > count )) && visible_end=$count
+
+    # Spacer Row (Matches Main View 'more above' line)
+    if (( SCROLL_OFFSET > 0 )); then
+        buf+="${C_GREY}    ▲ (more above)${CLR_EOL}${C_RESET}"$'\n'
+    else
+        buf+="${CLR_EOL}"$'\n'
+    fi
+
+    for (( i = visible_start; i < visible_end; i++ )); do
+        item=${_detail_items_ref[i]}
+        val=${VALUE_CACHE["${CURRENT_MENU_ID}::${item}"]:-${UNSET_MARKER}}
+        
+        case "$val" in
+            true)              display="${C_GREEN}ON${C_RESET}" ;;
+            false)             display="${C_RED}OFF${C_RESET}" ;;
+            "$UNSET_MARKER")   display="${C_YELLOW}⚠ UNSET${C_RESET}" ;;
+            *)                 display="${C_WHITE}${val}${C_RESET}" ;;
+        esac
+
+        printf -v padded_item "%-${ITEM_PADDING}s" "${item:0:${ITEM_PADDING}}"
+        if (( i == SELECTED_ROW )); then
+            buf+="${C_CYAN} ➤ ${C_INVERSE}${padded_item}${C_RESET} : ${display}${CLR_EOL}"$'\n'
+        else
+            buf+="    ${padded_item} : ${display}${CLR_EOL}"$'\n'
+        fi
+    done
+
+    # Fill remaining rows
+    local -i rows_rendered=$(( visible_end - visible_start ))
+    for (( i = rows_rendered; i < MAX_DISPLAY_ROWS; i++ )); do
+        buf+="${CLR_EOL}"$'\n'
+    done
+
+    # Footer Info
+    if (( count > MAX_DISPLAY_ROWS )); then
+        local position_info="[$(( SELECTED_ROW + 1 ))/${count}]"
+        if (( visible_end < count )); then
+            buf+="${C_GREY}    ▼ (more below) ${position_info}${CLR_EOL}${C_RESET}"$'\n'
+        else
+            buf+="${C_GREY}                   ${position_info}${CLR_EOL}${C_RESET}"$'\n'
+        fi
+    else
+        buf+="${CLR_EOL}"$'\n'
+    fi
+    
+    buf+=$'\n'"${C_CYAN} [Esc] Back  [r] Reset  [←/→ h/l] Adjust  [j/k] Nav${C_RESET}${CLR_EOL}"$'\n'
+    buf+="${C_CYAN} Submenu: ${C_WHITE}${CURRENT_MENU_ID}${C_RESET}${CLR_EOL}${CLR_EOS}"
+    printf '%s' "$buf"
+}
+
+draw_ui() {
+    case $CURRENT_VIEW in
+        0) draw_main_view ;;
+        1) draw_detail_view ;;
+    esac
+}
+
+# --- Input Handling ---
 
 navigate() {
     local -i dir=$1
-    local -n _nav_items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    local REPLY_REF REPLY_CTX
+    get_active_context
+    local -n _nav_items_ref="$REPLY_REF"
     local -i count=${#_nav_items_ref[@]}
     (( count == 0 )) && return 0
     SELECTED_ROW=$(( (SELECTED_ROW + dir + count) % count ))
@@ -560,7 +709,9 @@ navigate() {
 
 navigate_page() {
     local -i dir=$1
-    local -n _navp_items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    local REPLY_REF REPLY_CTX
+    get_active_context
+    local -n _navp_items_ref="$REPLY_REF"
     local -i count=${#_navp_items_ref[@]}
     (( count == 0 )) && return 0
     SELECTED_ROW=$(( SELECTED_ROW + dir * MAX_DISPLAY_ROWS ))
@@ -570,7 +721,9 @@ navigate_page() {
 
 navigate_end() {
     local -i target=$1
-    local -n _nave_items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    local REPLY_REF REPLY_CTX
+    get_active_context
+    local -n _nave_items_ref="$REPLY_REF"
     local -i count=${#_nave_items_ref[@]}
     (( count == 0 )) && return 0
     if (( target == 0 )); then SELECTED_ROW=0; else SELECTED_ROW=$(( count - 1 )); fi
@@ -578,7 +731,9 @@ navigate_end() {
 
 adjust() {
     local -i dir=$1
-    local -n _adj_items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    local REPLY_REF REPLY_CTX
+    get_active_context
+    local -n _adj_items_ref="$REPLY_REF"
     (( ${#_adj_items_ref[@]} == 0 )) && return 0
     modify_value "${_adj_items_ref[SELECTED_ROW]}" "$dir"
 }
@@ -588,7 +743,7 @@ switch_tab() {
     CURRENT_TAB=$(( (CURRENT_TAB + dir + TAB_COUNT) % TAB_COUNT ))
     SELECTED_ROW=0
     SCROLL_OFFSET=0
-    load_tab_values
+    load_active_values
 }
 
 set_tab() {
@@ -597,16 +752,42 @@ set_tab() {
         CURRENT_TAB=$idx
         SELECTED_ROW=0
         SCROLL_OFFSET=0
-        load_tab_values
+        load_active_values
     fi
+}
+
+check_drilldown() {
+    local -n _dd_items_ref="TAB_ITEMS_${CURRENT_TAB}"
+    (( ${#_dd_items_ref[@]} == 0 )) && return 1
+    
+    local item="${_dd_items_ref[SELECTED_ROW]}"
+    local config="${ITEM_MAP["${CURRENT_TAB}::${item}"]}"
+    local key type
+    IFS='|' read -r key type _ _ _ _ <<< "$config"
+    
+    if [[ "$type" == "menu" ]]; then
+        # Save state
+        PARENT_ROW=$SELECTED_ROW
+        PARENT_SCROLL=$SCROLL_OFFSET
+        
+        # Switch Context
+        CURRENT_MENU_ID="$key"
+        CURRENT_VIEW=1
+        SELECTED_ROW=0
+        SCROLL_OFFSET=0
+        load_active_values
+        return 0
+    fi
+    return 1
 }
 
 handle_mouse() {
     local input=$1
+    if (( CURRENT_VIEW != 0 )); then return 0; fi
+
     local -i button x y i start end
     local type zone
 
-    # Kept v3.2.4 Input Parsing (Fast String Stripping)
     local body=${input#'[<'}
     [[ "$body" == "$input" ]] && return 0
     local terminator=${body: -1}
@@ -632,8 +813,9 @@ handle_mouse() {
         done
     fi
 
-    if (( y >= ITEM_START_ROW && y < ITEM_START_ROW + MAX_DISPLAY_ROWS )); then
-        local -i clicked_idx=$(( y - ITEM_START_ROW + SCROLL_OFFSET ))
+    local -i effective_start=$(( ITEM_START_ROW + 1 ))
+    if (( y >= effective_start && y < effective_start + MAX_DISPLAY_ROWS )); then
+        local -i clicked_idx=$(( y - effective_start + SCROLL_OFFSET ))
         local -n _mouse_items_ref="TAB_ITEMS_${CURRENT_TAB}"
         local -i count=${#_mouse_items_ref[@]}
         if (( clicked_idx >= 0 && clicked_idx < count )); then
@@ -648,38 +830,110 @@ handle_mouse() {
 
 read_escape_seq() {
     local -n _esc_out=$1
-    local char
     _esc_out=""
-    while IFS= read -rsn1 -t "$ESC_READ_TIMEOUT" char; do
-        _esc_out+="$char"
-        case "$_esc_out" in
-            '[Z')              return 0 ;;
-            O[A-Za-z])         return 0 ;;
-            '['*[A-Za-z~])     return 0 ;;
-        esac
-    done
+    local char
+    if ! IFS= read -rsn1 -t "$ESC_READ_TIMEOUT" char; then
+        return 1
+    fi
+    _esc_out+="$char"
+    if [[ "$char" == '[' || "$char" == 'O' ]]; then
+        while IFS= read -rsn1 -t "$ESC_READ_TIMEOUT" char; do
+            _esc_out+="$char"
+            if [[ "$char" =~ [a-zA-Z~] ]]; then break; fi
+        done
+    fi
     return 0
 }
 
+# --- Input Router ---
+
+handle_key_main() {
+    local key="$1"
+    case "$key" in
+        '[Z')                switch_tab -1; return ;;
+        '[A'|'OA')           navigate -1; return ;;
+        '[B'|'OB')           navigate 1; return ;;
+        '[C'|'OC')           adjust 1; return ;;
+        '[D'|'OD')           adjust -1; return ;;
+        '[5~')               navigate_page -1; return ;;
+        '[6~')               navigate_page 1; return ;;
+        '[H'|'[1~')          navigate_end 0; return ;;
+        '[F'|'[4~')          navigate_end 1; return ;;
+        '['*'<'*[Mm])        handle_mouse "$key"; return ;;
+    esac
+
+    case "$key" in
+        k|K)            navigate -1 ;;
+        j|J)            navigate 1 ;;
+        l|L)            adjust 1 ;;
+        h|H)            adjust -1 ;;
+        g)              navigate_end 0 ;;
+        G)              navigate_end 1 ;;
+        $'\t')          switch_tab 1 ;;
+        r|R)            reset_defaults ;;
+        ''|$'\n')       check_drilldown || true ;; # CRITICAL FIX: Prevent crash
+        q|Q|$'\x03')    exit 0 ;;
+    esac
+}
+
+handle_key_detail() {
+    local key="$1"
+    case "$key" in
+        '[A'|'OA')           navigate -1; return ;;
+        '[B'|'OB')           navigate 1; return ;;
+        '[C'|'OC')           adjust 1; return ;;
+        '[D'|'OD')           adjust -1; return ;;
+        '[5~')               navigate_page -1; return ;;
+        '[6~')               navigate_page 1; return ;;
+        '[H'|'[1~')          navigate_end 0; return ;;
+        '[F'|'[4~')          navigate_end 1; return ;;
+    esac
+
+    case "$key" in
+        ESC)
+            # Return to Main View
+            CURRENT_VIEW=0
+            SELECTED_ROW=$PARENT_ROW
+            SCROLL_OFFSET=$PARENT_SCROLL
+            load_active_values
+            ;;
+        k|K)            navigate -1 ;;
+        j|J)            navigate 1 ;;
+        l|L)            adjust 1 ;;
+        h|H)            adjust -1 ;;
+        g)              navigate_end 0 ;;
+        G)              navigate_end 1 ;;
+        r|R)            reset_defaults ;;
+    esac
+}
+
+handle_input_router() {
+    local key="$1"
+    local escape_seq=""
+
+    if [[ "$key" == $'\x1b' ]]; then
+        if read_escape_seq escape_seq; then
+            key="$escape_seq"
+        else
+            key="ESC"
+        fi
+    fi
+
+    case $CURRENT_VIEW in
+        0) handle_key_main "$key" ;;
+        1) handle_key_detail "$key" ;;
+    esac
+}
+
 main() {
-    if (( BASH_VERSINFO[0] < 5 )); then
-        log_err "Bash 5.0+ required (found ${BASH_VERSION})"; exit 1
-    fi
-    if [[ ! -t 0 ]]; then
-        log_err "Interactive terminal (TTY) required on stdin"; exit 1
-    fi
-
-    # Auto-generate dummy config if missing
-    # generate_dummy_config
-
-    if [[ ! -f "$CONFIG_FILE" ]]; then log_err "Config not found: ${CONFIG_FILE}"; exit 1; fi
-    if [[ ! -r "$CONFIG_FILE" ]]; then log_err "Config not readable: ${CONFIG_FILE}"; exit 1; fi
-    if [[ ! -w "$CONFIG_FILE" ]]; then log_err "Config not writable: ${CONFIG_FILE}"; exit 1; fi
+    if (( BASH_VERSINFO[0] < 5 )); then log_err "Bash 5.0+ required"; exit 1; fi
+    if [[ ! -t 0 ]]; then log_err "TTY required"; exit 1; fi
+    if [[ ! -f "$CONFIG_FILE" ]]; then log_err "Config not found"; exit 1; fi
 
     local _dep
     for _dep in awk sed; do
         if ! command -v "$_dep" &>/dev/null; then
-            log_err "Required dependency not found: ${_dep}"; exit 1
+            log_err "Missing dependency: ${_dep}"; exit 1
         fi
     done
 
@@ -687,45 +941,16 @@ main() {
     populate_config_cache
 
     ORIGINAL_STTY=$(stty -g 2>/dev/null) || ORIGINAL_STTY=""
-    if ! stty -icanon -echo min 1 time 0 2>/dev/null; then
-        log_err "Failed to configure terminal (stty). Cannot run interactively."; exit 1
-    fi
+    stty -icanon -echo min 1 time 0 2>/dev/null
 
     printf '%s%s%s%s' "$MOUSE_ON" "$CURSOR_HIDE" "$CLR_SCREEN" "$CURSOR_HOME"
-    load_tab_values
+    load_active_values
 
-    local key escape_seq
-
+    local key
     while true; do
         draw_ui
         IFS= read -rsn1 key || break
-        if [[ "$key" == $'\x1b' ]]; then
-            read_escape_seq escape_seq
-            case "$escape_seq" in
-                '[Z')                switch_tab -1 ;;
-                '[A'|'OA')           navigate -1 ;;
-                '[B'|'OB')           navigate 1 ;;
-                '[C'|'OC')           adjust 1 ;;
-                '[D'|'OD')           adjust -1 ;;
-                '[5~')               navigate_page -1 ;;
-                '[6~')               navigate_page 1 ;;
-                '[H'|'[1~')          navigate_end 0 ;;
-                '[F'|'[4~')          navigate_end 1 ;;
-                '['*'<'*[Mm])        handle_mouse "$escape_seq" ;;
-            esac
-        else
-            case "$key" in
-                k|K)            navigate -1 ;;
-                j|J)            navigate 1 ;;
-                l|L)            adjust 1 ;;
-                h|H)            adjust -1 ;;
-                g)              navigate_end 0 ;;
-                G)              navigate_end 1 ;;
-                $'\t')          switch_tab 1 ;;
-                r|R)            reset_defaults ;;
-                q|Q|$'\x03')    break ;;
-            esac
-        fi
+        handle_input_router "$key"
     done
 }
 
